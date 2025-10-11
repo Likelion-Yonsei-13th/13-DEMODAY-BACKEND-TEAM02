@@ -1,1 +1,29 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environment
 myvenv/
+venv/
+.env
+.env.*
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+
+# VS Code / PyCharm
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# MySQL / DB dumps
+*.sql
+*.dump
+
+# 환경변수 파일
+.env
+.env.*
