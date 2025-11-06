@@ -1,0 +1,87 @@
+from django.conf import settings
+from django.db import models
+from django.core.validators import MinLengthValidator
+
+# 룸: 제안(RequestRootMap) 1건당 1개의 채팅방 (1:1)
+class ChatRoom(models.Model):
+    proposal = models.OneToOneField(
+        "DocumentApp.RequestRootMap",
+        on_delete=models.CASCADE,
+        related_name="chat_room",
+    )
+    # 조회 최적화를 위한 참여자 중복 저장(denormalize)
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="chat_rooms_as_requester",
+    )
+    proposer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="chat_rooms_as_proposer",
+    )
+
+    # 마지막 메시지 요약(정렬/목록용)
+    last_msg = models.ForeignKey(
+        "ChatMessage",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="+",              # 역참조 불필요
+    )
+    last_msg_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "chat_room"
+        indexes = [
+            models.Index(fields=["last_msg_at"]),  # 목록 최신순 정렬 최적화
+        ]
+
+    def __str__(self):
+        return f"Room#{self.pk} proposal={self.proposal_id}"
+
+
+class ChatMessage(models.Model):
+    class Type(models.TextChoices):
+        TEXT = "TEXT", "TEXT"
+        IMAGE = "IMAGE", "IMAGE"
+
+    room = models.ForeignKey(
+        ChatRoom, on_delete=models.CASCADE, related_name="messages"
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="sent_messages"
+    )
+
+    msg_type = models.CharField(max_length=8, choices=Type.choices, default=Type.TEXT)
+    body = models.CharField(max_length=512, null=True, blank=True)
+    image_url = models.CharField(max_length=255, null=True, blank=True)
+    image_size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_deleted = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "chat_message"
+        indexes = [
+            models.Index(fields=["room", "id"]),            # 무한 스크롤(> last id) 최적화
+            models.Index(fields=["room", "created_at"]),    # 시간순 조회 최적화
+        ]
+
+    def clean(self):
+        # 타입별 필수/금지 필드 검증
+        if self.msg_type == self.Type.TEXT:
+            if not self.body:
+                from django.core.exceptions import ValidationError
+                raise ValidationError("TEXT 메시지는 body가 필요합니다.")
+            self.image_url = None
+            self.image_size_bytes = None
+        elif self.msg_type == self.Type.IMAGE:
+            if not self.image_url:
+                from django.core.exceptions import ValidationError
+                raise ValidationError("IMAGE 메시지는 image_url이 필요합니다.")
+        super().clean()
+
+    def __str__(self):
+        return f"Msg#{self.pk} room={self.room_id} type={self.msg_type}"
