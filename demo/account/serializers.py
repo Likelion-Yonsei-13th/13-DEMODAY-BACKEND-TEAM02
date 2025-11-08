@@ -60,6 +60,7 @@ class UserRegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"agreed_privacy": "개인정보 처리방침 동의는 필수입니다."}
             )
+        return attrs
 
     def create(self, validated_data):
         validated_data.pop("password2", None)
