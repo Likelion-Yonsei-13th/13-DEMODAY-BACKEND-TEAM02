@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/3.2/ref/settings/
 import os
 from dotenv import load_dotenv
 from pathlib import Path
-
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -161,4 +161,15 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 20,
+}
+
+SIMPLE_JWT = {
+    # 토큰 유지 시간은 원하는 대로 바꿔도 됨
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    # Authorization: Bearer <token> 사용
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    # 🔥 핵심: 유저를 찾을 때 어떤 필드를 사용할지
+    "USER_ID_FIELD": "uuid",  # User.objects.get(uuid=...) 로 찾음
+    "USER_ID_CLAIM": "user_id",  # 토큰 안 claim 이름 (기본값 그대로 사용)
 }
