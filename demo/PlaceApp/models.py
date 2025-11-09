@@ -1,26 +1,27 @@
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
 
 class TravelPlace(models.Model):
     """
-    여행지 마스터 테이블
-    - ERD: id, name, photo, view_count
-    - + 위치 정보: country, state(시/도), city(구), district(동)
+    여행지 마스터
     """
 
-    id = models.BigAutoField(primary_key=True)  # PK
+    id = models.BigAutoField(primary_key=True)
 
-    name = models.CharField(max_length=50)  # NOT NULL
-    photo = models.URLField(max_length=255)  # NOT NULL
+    name = models.CharField(max_length=50)
+    photo = models.URLField(max_length=255)
 
     # 위치 정보 (나라 / 시도 / 구 / 동)
-    country = models.CharField(max_length=50)  # 예: "KR"
-    state = models.CharField(max_length=50)  # 예: "서울특별시"
-    city = models.CharField(max_length=50)  # 예: "마포구"
-    district = models.CharField(max_length=50)  # 예: "서교동"
+    country = models.CharField(max_length=50, default="", blank=True)
+    state = models.CharField(max_length=50, default="", blank=True)
+    city = models.CharField(max_length=50, default="", blank=True)
+    district = models.CharField(max_length=50, default="", blank=True)
 
-    view_count = models.PositiveIntegerField(default=0)  # NOT NULL, DEFAULT 0
+    # 조회수 / 좋아요 수
+    view_count = models.PositiveIntegerField(default=0)
+    likes_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         db_table = "travel_place"
@@ -33,25 +34,50 @@ class TravelPlace(models.Model):
         return f"{self.name} ({self.country}/{self.state}/{self.city}/{self.district})"
 
 
-class HotSpot(models.Model):
+class TravelPlaceLike(models.Model):
     """
-    기간별 HOT 여행지
-    - 한 기간(start_date~end_date) 동안의 인기 점수/순위
+    여행지 좋아요(하트)
+    - 유저당 하나만
     """
 
-    hot_id = models.BigAutoField(primary_key=True)  # PK
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="place_likes",
+    )
+    place = models.ForeignKey(
+        TravelPlace,
+        on_delete=models.CASCADE,
+        related_name="likes",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "travelplace_like"
+        unique_together = ("user", "place")
+
+    def __str__(self):
+        return f"{self.user_id} ♥ {self.place_id}"
+
+
+class HotSpot(models.Model):
+    """
+    기간별 HOT 여행지 (랭킹 캐시)
+    """
+
+    hot_id = models.BigAutoField(primary_key=True)
 
     place = models.ForeignKey(
         TravelPlace,
         on_delete=models.CASCADE,
         related_name="hotspots",
-    )  # FK
+    )
 
-    start_date = models.DateTimeField()  # NOT NULL
-    end_date = models.DateTimeField()  # NOT NULL
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
 
-    score = models.DecimalField(max_digits=10, decimal_places=4)  # NOT NULL
-    rank = models.PositiveIntegerField()  # NOT NULL
+    score = models.DecimalField(max_digits=10, decimal_places=4)
+    rank = models.PositiveIntegerField()
 
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -61,7 +87,6 @@ class HotSpot(models.Model):
             models.Index(fields=["start_date", "end_date"]),
             models.Index(fields=["rank"]),
         ]
-        # 같은 기간 안에서 같은 place 에 대해 한 줄만 유지
         unique_together = ("place", "start_date", "end_date")
 
     def __str__(self):
@@ -70,8 +95,7 @@ class HotSpot(models.Model):
 
 class TrendSpot(models.Model):
     """
-    나이대별 Trend 여행지
-    - age_group + 기간(start_date~end_date) 기준 랭킹
+    나이대별 Trend 여행지 (랭킹 캐시)
     """
 
     class AgeGroup(models.TextChoices):
@@ -84,25 +108,25 @@ class TrendSpot(models.Model):
         AGE_60P = "60P", "60+"
         UNKNOWN = "UNKNOWN", "Unknown"
 
-    trend_id = models.BigAutoField(primary_key=True)  # PK
+    trend_id = models.BigAutoField(primary_key=True)
 
     place = models.ForeignKey(
         TravelPlace,
         on_delete=models.CASCADE,
         related_name="trendspots",
-    )  # FK
+    )
 
     age_group = models.CharField(
         max_length=10,
         choices=AgeGroup.choices,
         default=AgeGroup.GLOBAL,
-    )  # NOT NULL DEFAULT 'GLOBAL'
+    )
 
-    start_date = models.DateTimeField()  # NOT NULL
-    end_date = models.DateTimeField()  # NOT NULL
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
 
-    score = models.DecimalField(max_digits=10, decimal_places=4)  # NOT NULL
-    rank = models.PositiveIntegerField()  # NOT NULL
+    score = models.DecimalField(max_digits=10, decimal_places=4)
+    rank = models.PositiveIntegerField()
 
     created_at = models.DateTimeField(default=timezone.now)
 
@@ -116,3 +140,69 @@ class TrendSpot(models.Model):
 
     def __str__(self):
         return f"TrendSpot#{self.trend_id} place={self.place_id} age={self.age_group} rank={self.rank}"
+
+
+class Wishlist(models.Model):
+    """
+    유저가 만드는 '위시리스트 폴더'
+    - 유튜브 플레이리스트 같은 개념
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="wishlists",
+    )
+    title = models.CharField(max_length=100)
+    description = models.CharField(max_length=255, blank=True)
+    is_public = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "wishlist"
+
+    def __str__(self):
+        return f"{self.user_id} - {self.title}"
+
+
+class WishlistItem(models.Model):
+    """
+    위시리스트 안에 실제로 담기는 아이템
+    - 지금은 여행지(TravelPlace)와 트렌드 카드(TrendSpot)만 연결
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    wishlist = models.ForeignKey(
+        Wishlist,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+
+    travel_spot = models.ForeignKey(
+        TravelPlace,
+        on_delete=models.CASCADE,
+        related_name="wishlist_items",
+        null=True,
+        blank=True,
+    )
+
+    trend = models.ForeignKey(
+        TrendSpot,
+        on_delete=models.CASCADE,
+        related_name="wishlist_items",
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "wishlist_item"
+        unique_together = ("wishlist", "travel_spot", "trend")
+
+    def __str__(self):
+        return f"WishlistItem#{self.id} wishlist={self.wishlist_id}"
