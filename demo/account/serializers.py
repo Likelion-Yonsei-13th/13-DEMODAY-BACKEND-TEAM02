@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.core import exceptions
 from django.contrib.auth.password_validation import validate_password
+from .models import Interest, InstagramVerification, LocalProfile, UserProfile
 
 User = get_user_model()
 
@@ -14,24 +15,58 @@ class UserRegisterSerializer(serializers.ModelSerializer):
     password2 = serializers.CharField(write_only=True)
     role = serializers.ChoiceField(choices=User.Role.choices)
     display_name = serializers.CharField(required=False, allow_blank=True)
+    birth_year = serializers.IntegerField(required=True)
+
+    # 약관 동의 체크박스
+    is_over_14 = serializers.BooleanField(required=True)
+    agreed_service_terms = serializers.BooleanField(required=True)
+    agreed_privacy = serializers.BooleanField(required=True)
+    agreed_marketing = serializers.BooleanField(required=False)
 
     class Meta:
         model = User
-        fields = ["username", "email", "password", "password2", "role", "display_name"]
+        fields = [
+            "username",
+            "email",
+            "password",
+            "password2",
+            "role",
+            "display_name",
+            "birth_year",
+            "is_over_14",
+            "agreed_service_terms",
+            "agreed_privacy",
+            "agreed_marketing",
+        ]
 
     def validate(self, attrs):
         if attrs["password"] != attrs["password2"]:
             raise serializers.ValidationError("비밀번호가 일치하지 않습니다.")
+
         try:
             validate_password(attrs["password"])
         except exceptions.ValidationError as e:
             raise serializers.ValidationError({"password": list(e.messages)})
+
+        if not attrs.get("is_over_14"):
+            raise serializers.ValidationError(
+                {"is_over_14": "만 14세 이상 동의가 필요합니다."}
+            )
+        if not attrs.get("agreed_service_terms"):
+            raise serializers.ValidationError(
+                {"agreed_service_terms": "이용약관 동의는 필수입니다."}
+            )
+        if not attrs.get("agreed_privacy"):
+            raise serializers.ValidationError(
+                {"agreed_privacy": "개인정보 처리방침 동의는 필수입니다."}
+            )
         return attrs
 
     def create(self, validated_data):
         validated_data.pop("password2", None)
         role = validated_data.pop("role")
-        display_name = validated_data.pop("display_name", "")
+        display_name = validated_data.pop("display_name")
+
         user = User.objects.create_user(
             username=validated_data["username"],
             email=validated_data["email"],
@@ -39,6 +74,11 @@ class UserRegisterSerializer(serializers.ModelSerializer):
             is_active=False,  # 이메일 인증 전까지 비활성
             role=role,
             display_name=display_name,
+            birth_year=validated_data.get("birth_year"),
+            is_over_14=validated_data.get("is_over_14", False),
+            agreed_service_terms=validated_data.get("agreed_service_terms", False),
+            agreed_privacy=validated_data.get("agreed_privacy", False),
+            agreed_marketing=validated_data.get("agreed_marketing", False),
         )
         return user
 
@@ -73,7 +113,6 @@ class UserLoginSerializer(serializers.Serializer):
 # ------------------------
 # Onboarding Domain
 # ------------------------
-from .models import Interest, InstagramVerification, LocalProfile, UserProfile
 
 
 class InterestSerializer(serializers.ModelSerializer):
