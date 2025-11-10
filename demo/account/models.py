@@ -37,12 +37,32 @@ class User(AbstractUser):
         LOCAL = "LOCAL", "Local"
         USER = "USER", "User"
 
-    # AbstractUser에 username 존재
+    # 기본 id 제거하고 uuid(BigInt) 를 PK로 사용
+    id = None
+    uuid = models.BigAutoField(primary_key=True)
+
+    # AbstractUser 에 username 이미 존재 (로그인 ID)
     email = models.EmailField(unique=True)
 
-    # 역할/표시이름
+    # 역할 / 닉네임
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.USER)
-    display_name = models.CharField(max_length=50, blank=True)
+    display_name = models.CharField(max_length=50)
+
+    # 기본 정보
+    birth_year = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    # 약관 동의 정보 (회원가입 화면 체크박스)
+    is_over_14 = models.BooleanField(default=False)
+    agreed_service_terms = models.BooleanField(default=False)
+    agreed_privacy = models.BooleanField(default=False)
+    agreed_marketing = models.BooleanField(default=False)  # 선택 동의
+
+    # 나중에 채팅 / 위시리스트 모델 만들면 FK로 교체 예정
+    chatroom_id = models.BigIntegerField(null=True, blank=True)
+    wishlist_id = models.BigIntegerField(null=True, blank=True)
+
+    # 가입일시
+    created_at = models.DateTimeField(auto_now_add=True)
 
     # 이메일 인증용 토큰(일회성)
     email_verification_token = models.UUIDField(null=True, blank=True)
@@ -51,6 +71,9 @@ class User(AbstractUser):
     REQUIRED_FIELDS = ["email"]
 
     objects = UserManager()
+
+    def __str__(self):
+        return self.username
 
 
 # ------------------------
