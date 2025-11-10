@@ -28,4 +28,4 @@ staticfiles/
 .env
 .env.*
 
-demo/settings.py
+demo/demo/settings.py
