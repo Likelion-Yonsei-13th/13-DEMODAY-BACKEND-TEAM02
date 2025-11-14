@@ -14,6 +14,7 @@ from .models import (
 )
 from .serializers import (
     TravelPlaceSerializer,
+    TravelPlaceListSerializerFlat,
     HotSpotSerializer,
     TrendSpotSerializer,
     WishlistSerializer,
@@ -354,3 +355,186 @@ class WishlistItemDetailView(generics.DestroyAPIView):
     def get_queryset(self):
         # 내 위시리스트 안에 있는 것만 삭제 가능
         return WishlistItem.objects.filter(wishlist__user=self.request.user)
+
+
+def _pick_period(qs, start_date, end_date):
+    """
+    start_date/end_date 둘 다 없으면 가장 최근 start_date 한 덩어리를 사용.
+    'YYYY-MM-DD'만 권장. (T 포함해 보내면 앞 10글자만 자름)
+    """
+
+    def _norm(d):
+        if not d:
+            return None
+        return d[:10]  # '2025-11-01T...' -> '2025-11-01'
+
+    sd = _norm(start_date)
+    ed = _norm(end_date)
+
+    if sd and ed:
+        return sd, ed
+
+    latest = qs.aggregate(latest_start=Max("start_date"))["latest_start"]
+    if latest:
+        return str(latest), None
+    return None, None
+
+
+class CountryHotRankingView(APIView):
+    """
+    GET /place/hotspots/countries/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&limit=10
+    - 기간 내 HotSpot 점수를 나라 단위로 합산해 랭킹 반환
+    - 기간 미지정 시 HotSpot의 가장 최근 start_date만 사용
+    응답 예:
+    [
+      {"country":"KR","score":1280,"places":34,"rank":1},
+      {"country":"JP","score":990,"places":21,"rank":2},
+      ...
+    ]
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from .models import HotSpot  # 순환 import 방지용
+
+        qs = HotSpot.objects.select_related("place")
+        sd, ed = _pick_period(
+            qs,
+            request.query_params.get("start_date"),
+            request.query_params.get("end_date"),
+        )
+        if sd:
+            qs = qs.filter(start_date=sd)
+        if ed:
+            qs = qs.filter(end_date=ed)
+
+        agg = (
+            qs.values("place__country")
+            .annotate(score=Sum("score"), places=Count("place", distinct=True))
+            .order_by("-score")
+        )
+
+        try:
+            limit = int(request.query_params.get("limit", "10"))
+        except ValueError:
+            limit = 10
+
+        data = []
+        for i, row in enumerate(agg[:limit], start=1):
+            data.append(
+                {
+                    "country": row["place__country"] or "",
+                    "score": row["score"] or 0,
+                    "places": row["places"] or 0,
+                    "rank": i,
+                }
+            )
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class CityHotRankingView(APIView):
+    """
+    GET /place/hotspots/cities/?country=KR&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&limit=10
+    (옵션) state=서울특별시  → 나라 안에서 시/구 조합을 더 좁혀서 보고 싶을 때
+
+    - 기간 내 HotSpot 점수를 (state, city) 단위로 합산해 랭킹 반환
+    - 기간 미지정 시 HotSpot의 가장 최근 start_date만 사용
+    응답 예:
+    [
+      {"country":"KR","state":"서울특별시","city":"마포구","score":420,"places":7,"rank":1},
+      {"country":"KR","state":"오사카부","city":"오사카시","score":390,"places":5,"rank":2},
+      ...
+    ]
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        from .models import HotSpot
+
+        country = request.query_params.get("country")
+        if not country:
+            return Response(
+                {"detail": "country 파라미터가 필요합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        state = request.query_params.get("state")
+
+        qs = HotSpot.objects.select_related("place").filter(place__country=country)
+        if state:
+            qs = qs.filter(place__state=state)
+
+        sd, ed = _pick_period(
+            qs,
+            request.query_params.get("start_date"),
+            request.query_params.get("end_date"),
+        )
+        if sd:
+            qs = qs.filter(start_date=sd)
+        if ed:
+            qs = qs.filter(end_date=ed)
+
+        agg = (
+            qs.values("place__country", "place__state", "place__city")
+            .annotate(score=Sum("score"), places=Count("place", distinct=True))
+            .order_by("-score")
+        )
+
+        try:
+            limit = int(request.query_params.get("limit", "10"))
+        except ValueError:
+            limit = 10
+
+        data = []
+        for i, row in enumerate(agg[:limit], start=1):
+            data.append(
+                {
+                    "country": row["place__country"] or "",
+                    "state": row["place__state"] or "",
+                    "city": row["place__city"] or "",
+                    "score": row["score"] or 0,
+                    "places": row["places"] or 0,
+                    "rank": i,
+                }
+            )
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class PlacesByRegionView(generics.ListAPIView):
+    """
+    GET /place/places/by-region/?country=KR&state=서울특별시&city=마포구&district=서교동&order=likes&limit=20
+    - 전달된 지역 필터로 TravelPlace 목록을 반환
+    - order: likes(기본) | views | name
+    """
+
+    permission_classes = [permissions.AllowAny]
+    serializer_class = TravelPlaceListSerializerFlat  # 평면 필드용이어야 함
+
+    def get_queryset(self):
+        qs = TravelPlace.objects.all()
+        p = self.request.query_params
+
+        country = p.get("country")
+        state = p.get("state")
+        city = p.get("city")
+        district = p.get("district")
+
+        if country:
+            qs = qs.filter(country=country)
+        if state:
+            qs = qs.filter(state=state)
+        if city:
+            qs = qs.filter(city=city)
+        if district:
+            qs = qs.filter(district=district)
+
+        order = (p.get("order") or "likes").lower()
+        order_map = {
+            "likes": "-likes_count",
+            "views": "-view_count",
+            "name": "name",
+        }
+        qs = qs.order_by(order_map.get(order, "-likes_count"))
+        return qs
