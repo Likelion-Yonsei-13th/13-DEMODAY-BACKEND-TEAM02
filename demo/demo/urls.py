@@ -22,5 +22,6 @@ urlpatterns = [
     path("account/", include("account.urls")),
     path("document/", include("DocumentApp.urls")),
     path("place/", include("PlaceApp.urls")),
+    path('chat/', include('ChatApp.urls')),
     path("story/", include("StoryApp.urls")),
 ]
