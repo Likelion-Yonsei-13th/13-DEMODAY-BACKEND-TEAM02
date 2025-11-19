@@ -99,3 +99,45 @@ class RequestRootMap(models.Model):  # 요청서-루트 연결(제안)
 
     def __str__(self):
         return f"RequestRootMap#{self.pk} req={self.request_id} root={self.root_id}"
+
+
+class ThemeTag(models.Model):
+    """
+    여행 테마 태그 보관용 테이블
+    - id        : BIGINT UNSIGNED AUTO_INCREMENT, PK
+    - name      : VARCHAR(100) NOT NULL
+    - level     : TINYINT UNSIGNED NOT NULL, CHECK (1~3)
+    - parent_id : BIGINT UNSIGNED, FK(ThemeTag.id), level 1 은 NULL
+    """
+
+    id = models.BigAutoField(primary_key=True)
+
+    name = models.CharField(
+        max_length=100,
+        null=False,
+        blank=False,
+        help_text='태그 이름 (예: "여유로운 여행", "숨겨진 로컬 스팟")',
+    )
+
+    level = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(3)],
+        help_text="계층 레벨 (1=대분류, 2=중분류, 3=소분류)",
+    )
+
+    # DB 컬럼명은 parent_id 로 생성됨
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="children",
+        help_text="부모 태그 (level 1은 NULL, level 2/3은 상위 테마 태그)",
+    )
+
+    class Meta:
+        db_table = "theme_tag"
+        verbose_name = "여행 테마 태그"
+        verbose_name_plural = "여행 테마 태그들"
+
+    def __str__(self):
+        return f"ThemeTag#{self.pk} name={self.name} level={self.level}"
