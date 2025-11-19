@@ -1,225 +1,460 @@
 # PlaceApp/management/commands/recalc_hot_trend.py
+from __future__ import annotations
 
-from django.core.management.base import BaseCommand
-from django.utils import timezone
+from collections import defaultdict
 from datetime import datetime, timedelta
-import calendar
+from typing import Dict, Tuple, Optional
 
+from django.apps import apps
+from django.conf import settings
+from django.core.management.base import BaseCommand
+from django.db import transaction
+from django.db.models import Count
+from django.utils import timezone
+
+# 모델은 기존 네 구조(원상복구) 가정
 from PlaceApp.models import (
     TravelPlace,
-    TravelPlaceLike,
-    WishlistItem,
     HotSpot,
     TrendSpot,
+    TravelPlaceLike,
+    WishlistItem,
 )
-from account.models import User
+
+# ---------------------------
+# 가중치 / 하이퍼파라미터 (필요하면 커맨드라인 인자로 override)
+# ---------------------------
+DEFAULT_W_LIKE = 5.0  # 장소 좋아요(기간 내)
+DEFAULT_W_WISHLIST = 3.0  # 위시리스트 추가(기간 내)
+DEFAULT_W_STORY_POST = 4.0  # 스토리 글 1건(지역→장소 분배)
+DEFAULT_W_STORY_LIKE = 2.0  # 스토리 좋아요 1건(지역→장소 분배)
+
+# 장소 분배 기본 가중치: w_i = 1 + likes_count + α*view_count + β*wishlist_total
+DEFAULT_ALPHA = 0.0005  # view_count 스케일링
+DEFAULT_BETA = 0.5  # (전체 기간) wishlist 누적 스케일링
+
+AGE_GROUP_LABELS = ("10S", "20S", "30S", "40S", "50S", "60S", "70S", "80S", "GLOBAL")
+
+
+def _tz_aware_start_end(start_str: str, end_str: str):
+    """
+    YYYY-MM-DD 두 날짜를 [start, end) 구간의 'aware datetime'으로 변환
+    (zoneinfo 환경: localize 대신 make_aware 사용)
+    """
+    tz = timezone.get_current_timezone()  # settings.TIME_ZONE 기반
+    start_naive = datetime.strptime(start_str, "%Y-%m-%d")  # 00:00
+    end_naive = datetime.strptime(end_str, "%Y-%m-%d") + timedelta(
+        days=1
+    )  # 다음날 00:00 (exclusive)
+
+    if getattr(settings, "USE_TZ", True):
+        start_dt = timezone.make_aware(start_naive, tz)
+        end_dt = timezone.make_aware(end_naive, tz)
+    else:
+        # USE_TZ = False 인 경우 그냥 naive datetime 사용
+        start_dt, end_dt = start_naive, end_naive
+
+    return start_dt, end_dt
+
+
+def _safe_get_age_group(user) -> Optional[str]:
+    """
+    유저에서 나이대 문자열을 추출. 필드 불명확하므로 여러 패턴 시도.
+    없으면 None 반환.
+    """
+    # 1) 직접 age_group 같은 필드가 있을 때
+    for attr in ("age_group", "AGE_GROUP", "ageGroup"):
+        if hasattr(user, attr):
+            val = getattr(user, attr)
+            if isinstance(val, str) and val.strip():
+                return val.strip().upper()
+
+    # 2) profile.age_group 같은 형태
+    profile = getattr(user, "profile", None)
+    if profile is not None:
+        for attr in ("age_group", "AGE_GROUP", "ageGroup"):
+            if hasattr(profile, attr):
+                val = getattr(profile, attr)
+                if isinstance(val, str) and val.strip():
+                    return val.strip().upper()
+
+    # 3) 생년으로 추정 (YYYY or date)
+    for attr in ("birth_year", "BIRTH_YEAR", "birth", "date_of_birth", "dob"):
+        if hasattr(user, attr):
+            val = getattr(user, attr)
+            try:
+                # birth_year = int
+                year = None
+                if isinstance(val, int):
+                    year = val
+                elif isinstance(val, str) and val.isdigit():
+                    year = int(val)
+                elif hasattr(val, "year"):
+                    year = int(val.year)
+
+                if year and 1900 < year < 2100:
+                    from datetime import date
+
+                    age = date.today().year - year
+                    decade = max(10, min(80, (age // 10) * 10))
+                    return f"{decade}S"
+            except Exception:
+                pass
+
+    return None
+
+
+def _total_wishlist_per_place() -> Dict[int, int]:
+    """
+    전체 기간 위시리스트 누적(분배 가중치용)
+    """
+    q = (
+        WishlistItem.objects.filter(travel_spot__isnull=False)
+        .values("travel_spot_id")
+        .annotate(c=Count("id"))
+    )
+    return {row["travel_spot_id"]: row["c"] for row in q}
+
+
+def _base_weight_for_place(
+    p: TravelPlace, total_wishlist_dict: Dict[int, int], alpha: float, beta: float
+) -> float:
+    wish_tot = total_wishlist_dict.get(p.id, 0)
+    return (
+        1.0
+        + float(p.likes_count)
+        + alpha * float(p.view_count)
+        + beta * float(wish_tot)
+    )
+
+
+def _region_tuple_of_place(p: TravelPlace) -> Tuple[str, str, str, str]:
+    return (p.country or "", p.state or "", p.city or "", p.district or "")
+
+
+def _iter_story_events(start_dt, end_dt):
+    """
+    StoryApp(있으면)에서 스토리/스토리좋아요 이벤트를 지역 단위로 집계해서 yield.
+    없으면 빈 제너레이터.
+    반환 예: ('POST', (country,state,city,district), count, {'age_group': '20S' or None})
+            ('LIKE', (....), count, {'age_group': '30S' or None})
+    """
+    try:
+        Story = apps.get_model("StoryApp", "Story")
+    except LookupError:
+        Story = None
+
+    try:
+        StoryLike = apps.get_model("StoryApp", "StoryLike")
+    except LookupError:
+        StoryLike = None
+
+    if Story:
+        # 스토리 글 수(작성자 연령대 기준으로 나눠 계산 가능)
+        qs = (
+            Story.objects.filter(
+                created_at__gte=start_dt, created_at__lt=end_dt, is_public=True
+            )
+            .select_related("author")
+            .only("country", "state", "city", "district", "author_id")
+        )
+        # 지역별 + 연령대별로 직접 파이썬 집계 (DB 필드 불확실성 때문에)
+        bucket = defaultdict(int)
+        for s in qs:
+            ag = _safe_get_age_group(getattr(s, "author", None))
+            key = (
+                (s.country or ""),
+                (s.state or ""),
+                (s.city or ""),
+                (s.district or ""),
+                ag or "",
+            )
+            bucket[key] += 1
+
+        for (co, st, ci, di, ag), c in bucket.items():
+            yield ("POST", (co, st, ci, di), c, {"age_group": ag or None})
+
+    if StoryLike:
+        qs = (
+            StoryLike.objects.filter(created_at__gte=start_dt, created_at__lt=end_dt)
+            .select_related("user", "story")
+            .only("user_id", "story_id")
+        )
+        bucket = defaultdict(int)
+        for sl in qs:
+            story = getattr(sl, "story", None)
+            if not story:
+                continue
+            ag = _safe_get_age_group(getattr(sl, "user", None))
+            key = (
+                (story.country or ""),
+                (story.state or ""),
+                (story.city or ""),
+                (story.district or ""),
+                ag or "",
+            )
+            bucket[key] += 1
+
+        for (co, st, ci, di, ag), c in bucket.items():
+            yield ("LIKE", (co, st, ci, di), c, {"age_group": ag or None})
 
 
 class Command(BaseCommand):
     """
-    최근 월 / 지정한 월 기준으로 HotSpot & TrendSpot 랭킹 생성
-
-    사용 예시:
-      # 이번 달 기준 (기본값)
-      python manage.py recalc_hot_trend
-
-      # 2025년 11월 기준
-      python manage.py recalc_hot_trend --year=2025 --month=11
+    방법 B 구현:
+    - 기간 내 장소 좋아요/위시리스트 추가 → place 점수 가산
+    - 기간 내 스토리/스토리 좋아요(지역 이벤트) → 같은 지역의 place들에 가중치 분배 후 가산
+    - HotSpot: place별 총점으로 rank 저장
+    - TrendSpot: 연령대별로 동일 계산 (연령 불명은 스킵)
     """
 
-    help = "HotSpot / TrendSpot 랭킹 재계산"
+    help = (
+        "Recalculate HotSpot & TrendSpot for a period. (Method B + Wishlist included)"
+    )
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--year",
-            type=int,
-            help="집계 기준 연도 (예: 2025). 기본: 오늘 날짜 기준 연도",
-        )
-        parser.add_argument(
-            "--month",
-            type=int,
-            help="집계 기준 월 (1~12). 기본: 오늘 날짜 기준 월",
-        )
+        parser.add_argument("--start", required=True, help="YYYY-MM-DD (inclusive)")
+        parser.add_argument("--end", required=True, help="YYYY-MM-DD (inclusive)")
+        parser.add_argument("--dry-run", action="store_true")
 
-    def handle(self, *args, **options):
-        # 1) 기준 기간(start, end) 계산
-        now = timezone.now()
+        parser.add_argument("--w-like", type=float, default=DEFAULT_W_LIKE)
+        parser.add_argument("--w-wishlist", type=float, default=DEFAULT_W_WISHLIST)
+        parser.add_argument("--w-story-post", type=float, default=DEFAULT_W_STORY_POST)
+        parser.add_argument("--w-story-like", type=float, default=DEFAULT_W_STORY_LIKE)
 
-        year = options["year"] or now.year
-        month = options["month"] or now.month
+        parser.add_argument("--alpha", type=float, default=DEFAULT_ALPHA)
+        parser.add_argument("--beta", type=float, default=DEFAULT_BETA)
 
-        # 해당 월의 1일 00:00:00
-        month_start_naive = datetime(year, month, 1, 0, 0, 0)
+    def handle(self, *args, **opts):
+        start_dt, end_dt = _tz_aware_start_end(opts["start"], opts["end"])
+        dry_run = bool(opts["dry_run"])
 
-        # 해당 월의 마지막 날
-        last_day = calendar.monthrange(year, month)[1]
-        month_end_naive = datetime(year, month, last_day, 23, 59, 59)
+        W_LIKE = float(opts["w_like"])
+        W_WISHLIST = float(opts["w_wishlist"])
+        W_STORY_POST = float(opts["w_story_post"])
+        W_STORY_LIKE = float(opts["w_story_like"])
+        ALPHA = float(opts["alpha"])
+        BETA = float(opts["beta"])
 
-        # 타임존 aware 로 변환
-        start = timezone.make_aware(month_start_naive, timezone.get_current_timezone())
-        end = timezone.make_aware(month_end_naive, timezone.get_current_timezone())
-
-        self.stdout.write(self.style.NOTICE(f"[집계 기간] {start} ~ {end}"))
-
-        # 2) 기존에 같은 기간으로 생성된 랭킹 삭제 (있으면 덮어쓰기)
-        HotSpot.objects.filter(start_date=start, end_date=end).delete()
-        TrendSpot.objects.filter(start_date=start, end_date=end).delete()
-
-        # 3) 전체 기준 HotSpot 점수 계산
-        place_scores = self._calc_place_scores(start, end)
-
-        ranked_places = sorted(place_scores.items(), key=lambda x: x[1], reverse=True)
-
-        self._create_hotspots(ranked_places, start, end)
-
-        # 4) 나이대별 TrendSpot 계산
-        self._create_trendspots(start, end)
-
-        self.stdout.write(self.style.SUCCESS("✅ HotSpot / TrendSpot 재계산 완료"))
-
-    # =========================
-    #   내부 헬퍼 메서드들
-    # =========================
-
-    def _calc_place_scores(self, start, end):
-        """
-        전체 유저 기준 여행지별 점수 계산
-
-        현재 점수 식 (나중에 가중치는 바꿔도 됨):
-          score = view_count
-                  + like_count_기간 * 3
-                  + wishlist_count_기간 * 5
-        """
-        scores = {}
-
-        for place in TravelPlace.objects.all():
-            # 누적 조회수
-            views = place.view_count
-
-            # 기간 내 좋아요 수
-            likes = TravelPlaceLike.objects.filter(
-                place=place,
-                created_at__range=(start, end),
-            ).count()
-
-            # 기간 내 위시리스트 추가 수
-            wishlist_adds = WishlistItem.objects.filter(
-                travel_spot=place,
-                created_at__range=(start, end),
-            ).count()
-
-            score = views + likes * 3 + wishlist_adds * 5
-
-            if score > 0:
-                scores[place] = score
-
-        return scores
-
-    def _create_hotspots(self, ranked_places, start, end, max_count=50):
-        """
-        ranked_places: [(place, score), ...]
-        """
-        objs = []
-        for idx, (place, score) in enumerate(ranked_places[:max_count], start=1):
-            objs.append(
-                HotSpot(
-                    place=place,
-                    start_date=start,
-                    end_date=end,
-                    score=score,
-                    rank=idx,
-                )
+        self.stdout.write(
+            self.style.HTTP_INFO(
+                f"[recalc] window=[{start_dt} ~ {end_dt}) dry_run={dry_run} "
+                f"W(like)={W_LIKE} W(wishlist)={W_WISHLIST} W(story_post)={W_STORY_POST} W(story_like)={W_STORY_LIKE} "
+                f"alpha={ALPHA} beta={BETA}"
             )
+        )
 
-        HotSpot.objects.bulk_create(objs)
-        self.stdout.write(self.style.SUCCESS(f"🔥 HotSpot {len(objs)}개 생성"))
+        # -------------------------
+        # 0) 곳(place) 캐시, 분배용 전체 위시리스트 누적
+        # -------------------------
+        place_qs = TravelPlace.objects.all().only(
+            "id", "likes_count", "view_count", "country", "state", "city", "district"
+        )
+        place_map: Dict[int, TravelPlace] = {p.id: p for p in place_qs}
+        total_wish_map = _total_wishlist_per_place()
 
-    # ---------- TrendSpot ----------
+        # -------------------------
+        # 1) 기간 내 장소 좋아요/위시리스트
+        # -------------------------
+        like_counts = defaultdict(int)  # place_id -> count
+        for row in (
+            TravelPlaceLike.objects.filter(
+                created_at__gte=start_dt, created_at__lt=end_dt
+            )
+            .values("place_id")
+            .annotate(c=Count("id"))
+        ):
+            like_counts[row["place_id"]] = row["c"]
 
-    def _create_trendspots(self, start, end, max_count=50):
-        """
-        나이대별(10S, 20S, ...) TrendSpot 생성
-        """
+        wish_counts = defaultdict(int)  # place_id -> count
+        for row in (
+            WishlistItem.objects.filter(
+                created_at__gte=start_dt,
+                created_at__lt=end_dt,
+                travel_spot__isnull=False,
+            )
+            .values("travel_spot_id")
+            .annotate(c=Count("id"))
+        ):
+            wish_counts[row["travel_spot_id"]] = row["c"]
 
-        # (코드, 최소나이, 최대나이)
-        age_groups = [
-            ("10S", 10, 19),
-            ("20S", 20, 29),
-            ("30S", 30, 39),
-            ("40S", 40, 49),
-            ("50S", 50, 59),
-            ("60P", 60, 120),
-        ]
+        # -------------------------
+        # 2) 스토리(있으면) 지역→장소 분배 (글/좋아요 따로)
+        # -------------------------
+        distributed_from_story = defaultdict(float)  # place_id -> credit
+        distributed_from_story_by_age = defaultdict(
+            float
+        )  # (age_group, place_id) -> credit
 
-        # 기준 연도: 집계 기간 끝나는 해
-        ref_year = end.year
+        # region -> place ids 캐시 (자주 쓰이므로)
+        def _places_in_region(region: Tuple[str, str, str, str]):
+            co, st, ci, di = region
+            return [
+                p
+                for p in place_qs
+                if (p.country or "") == co
+                and (p.state or "") == st
+                and (p.city or "") == ci
+                and (p.district or "") == di
+            ]
 
-        for code, min_age, max_age in age_groups:
-            users = self._users_in_age_range(ref_year, min_age, max_age)
-            if not users.exists():
+        for kind, region, cnt, meta in _iter_story_events(start_dt, end_dt):
+            if cnt <= 0:
+                continue
+            places = _places_in_region(region)
+            if not places:
                 continue
 
-            scores = self._calc_place_scores_by_users(users, start, end)
-            ranked_places = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+            # 분배 가중치 계산
+            weights = []
+            for p in places:
+                w = _base_weight_for_place(p, total_wish_map, ALPHA, BETA)
+                weights.append(max(0.000001, w))
+            sum_w = sum(weights)
+            unit = (W_STORY_POST if kind == "POST" else W_STORY_LIKE) * float(cnt)
 
-            objs = []
-            for idx, (place, score) in enumerate(ranked_places[:max_count], start=1):
-                objs.append(
-                    TrendSpot(
-                        place=place,
-                        age_group=code,
-                        start_date=start,
-                        end_date=end,
-                        score=score,
-                        rank=idx,
+            for p, w in zip(places, weights):
+                credit = unit * (w / sum_w)
+                distributed_from_story[p.id] += credit
+                ag = (meta or {}).get("age_group")
+                if ag and isinstance(ag, str) and ag.strip():
+                    distributed_from_story_by_age[(ag.strip().upper(), p.id)] += credit
+
+        # -------------------------
+        # 3) HotSpot 점수 합산 (place별)
+        # -------------------------
+        score_by_place = defaultdict(float)
+        for pid, c in like_counts.items():
+            score_by_place[pid] += W_LIKE * float(c)
+        for pid, c in wish_counts.items():
+            score_by_place[pid] += W_WISHLIST * float(c)
+        for pid, v in distributed_from_story.items():
+            score_by_place[pid] += float(v)
+
+        # -------------------------
+        # 4) TrendSpot (연령대별) 점수
+        #    - 장소 좋아요: liker 연령대 기준
+        #    - 위시리스트: 생성자(=wishlist.user) 연령대 기준
+        #    - 스토리: 위에서 분배된 by_age 그대로 사용
+        # -------------------------
+        score_by_age_place = defaultdict(float)  # (age_group, place_id) -> score
+
+        # 4-1) 장소 좋아요 by age
+        like_qs = (
+            TravelPlaceLike.objects.filter(
+                created_at__gte=start_dt, created_at__lt=end_dt
+            )
+            .select_related("user")
+            .only("place_id", "user_id")
+        )
+        for lk in like_qs:
+            ag = _safe_get_age_group(getattr(lk, "user", None))
+            if not ag:
+                continue
+            score_by_age_place[(ag, lk.place_id)] += W_LIKE
+
+        # 4-2) 위시리스트 by age
+        wish_qs = (
+            WishlistItem.objects.filter(
+                created_at__gte=start_dt,
+                created_at__lt=end_dt,
+                travel_spot__isnull=False,
+            )
+            .select_related("wishlist__user", "travel_spot")
+            .only("wishlist_id", "travel_spot_id")
+        )
+        for wi in wish_qs:
+            wl = getattr(wi, "wishlist", None)
+            if wl is None:
+                continue
+            ag = _safe_get_age_group(getattr(wl, "user", None))
+            if not ag:
+                continue
+            score_by_age_place[(ag, wi.travel_spot_id)] += W_WISHLIST
+
+        # 4-3) 스토리 분배분 by age (이미 계산됨)
+        for (ag, pid), credit in distributed_from_story_by_age.items():
+            score_by_age_place[(ag, pid)] += float(credit)
+
+        # -------------------------
+        # 5) DB 반영 (해당 기간만 삭제 후 재생성)
+        # -------------------------
+        if dry_run:
+            self.stdout.write(
+                self.style.WARNING("[dry-run] HotSpot/TrendSpot DB write SKIPPED")
+            )
+            # 출력 요약
+            top_hot = sorted(score_by_place.items(), key=lambda x: x[1], reverse=True)[
+                :10
+            ]
+            self.stdout.write(self.style.HTTP_INFO("Top10 HotSpot (place_id, score):"))
+            for pid, sc in top_hot:
+                nm = place_map.get(pid).name if pid in place_map else "?"
+                self.stdout.write(f"  #{pid} ({nm}): {sc:.3f}")
+
+            ag_groups = {}
+            for (ag, pid), sc in score_by_age_place.items():
+                ag_groups.setdefault(ag, 0)
+                ag_groups[ag] += sc
+            self.stdout.write(
+                self.style.HTTP_INFO(f"Trend groups present: {list(ag_groups.keys())}")
+            )
+            return
+
+        with transaction.atomic():
+            HotSpot.objects.filter(
+                start_date=start_dt.date(), end_date=(end_dt - timedelta(days=1)).date()
+            ).delete()
+            TrendSpot.objects.filter(
+                start_date=start_dt.date(), end_date=(end_dt - timedelta(days=1)).date()
+            ).delete()
+
+            # HotSpot insert
+            hot_rows = []
+            ranked = sorted(score_by_place.items(), key=lambda x: x[1], reverse=True)
+            rank = 1
+            for pid, sc in ranked:
+                if pid not in place_map:
+                    continue
+                if sc <= 0:
+                    continue
+                hot_rows.append(
+                    HotSpot(
+                        place_id=pid,
+                        start_date=start_dt.date(),
+                        end_date=(end_dt - timedelta(days=1)).date(),
+                        score=float(sc),
+                        rank=rank,
                     )
                 )
+                rank += 1
+            HotSpot.objects.bulk_create(hot_rows, batch_size=500)
 
-            TrendSpot.objects.bulk_create(objs)
-            self.stdout.write(
-                self.style.SUCCESS(f"📈 TrendSpot[{code}] {len(objs)}개 생성")
+            # TrendSpot insert (age group별 랭킹)
+            trend_rows = []
+            # age_group -> [(place_id, score)]
+            per_ag: Dict[str, list] = defaultdict(list)
+            for (ag, pid), sc in score_by_age_place.items():
+                if pid in place_map and sc > 0:
+                    per_ag[ag].append((pid, sc))
+
+            for ag, arr in per_ag.items():
+                arr.sort(key=lambda x: x[1], reverse=True)
+                for idx, (pid, sc) in enumerate(arr, start=1):
+                    trend_rows.append(
+                        TrendSpot(
+                            place_id=pid,
+                            age_group=ag,
+                            start_date=start_dt.date(),
+                            end_date=(end_dt - timedelta(days=1)).date(),
+                            score=float(sc),
+                            rank=idx,
+                        )
+                    )
+            TrendSpot.objects.bulk_create(trend_rows, batch_size=500)
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"[done] HotSpot inserted={len(hot_rows)} TrendSpot inserted={len(trend_rows)}"
             )
-
-        # 글로벌(전체) 트렌드도 만들고 싶으면 여기서 한 번 더 place_scores 사용해서 생성해도 됨
-
-    def _users_in_age_range(self, ref_year, min_age, max_age):
-        """
-        ref_year 기준으로 min_age ~ max_age 인 유저 찾기
-        age = ref_year - birth_year
-        """
-        max_birth_year = ref_year - min_age  # 예: 2025 - 20 = 2005
-        min_birth_year = ref_year - max_age  # 예: 2025 - 29 = 1996
-
-        return User.objects.filter(
-            birth_year__isnull=False,
-            birth_year__gte=min_birth_year,
-            birth_year__lte=max_birth_year,
         )
-
-    def _calc_place_scores_by_users(self, users, start, end):
-        """
-        특정 유저 집합(users)에 대해서만 좋아요/위시리스트 기준 점수 계산
-        (조회수는 전유저 공통이라 여기선 제외)
-        """
-        scores = {}
-        user_ids = users.values_list("uuid", flat=True)  # User PK 필드명에 맞게 사용
-
-        for place in TravelPlace.objects.all():
-            likes = TravelPlaceLike.objects.filter(
-                place=place,
-                user_id__in=user_ids,
-                created_at__range=(start, end),
-            ).count()
-
-            wishlist_adds = WishlistItem.objects.filter(
-                travel_spot=place,
-                wishlist__user_id__in=user_ids,
-                created_at__range=(start, end),
-            ).count()
-
-            score = likes * 3 + wishlist_adds * 5
-
-            if score > 0:
-                scores[place] = score
-
-        return scores

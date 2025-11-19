@@ -25,6 +25,22 @@ class TravelPlaceSerializer(serializers.ModelSerializer):
         ]
 
 
+class TravelPlaceListSerializerFlat(serializers.ModelSerializer):
+    class Meta:
+        model = TravelPlace
+        fields = (
+            "id",
+            "name",
+            "photo",
+            "country",
+            "state",
+            "city",
+            "district",
+            "likes_count",
+            "view_count",
+        )
+
+
 class HotSpotSerializer(serializers.ModelSerializer):
     place = TravelPlaceSerializer(read_only=True)
 
