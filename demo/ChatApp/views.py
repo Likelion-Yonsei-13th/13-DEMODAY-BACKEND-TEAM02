@@ -1,146 +1,162 @@
-# ChatApp/views.py
+from django.shortcuts import get_object_or_404
 from django.db.models import Q
-from rest_framework import viewsets, mixins, status
-from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+
+from rest_framework import generics, permissions, status, parsers
+from rest_framework.views import APIView
 from rest_framework.response import Response
+
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 from .models import ChatRoom, ChatMessage
 from .serializers import ChatRoomSerializer, ChatMessageSerializer
-from .permissions import IsRoomParticipant
-from .pagination import MessageCursorPagination
+from .permissions import IsChatParticipant
 
 
-class ChatRoomViewSet(mixins.ListModelMixin,
-                      mixins.RetrieveModelMixin,
-                      mixins.CreateModelMixin,
-                      viewsets.GenericViewSet):
+class ChatRoomListCreateView(generics.ListCreateAPIView):
     """
-    채팅방 목록/조회/생성
-    - 생성(create): payload {"proposal": <RequestRootMap id>}
-      → proposal에서 requester/proposer를 자동 세팅
-      → 이미 동일 proposal의 방이 있으면 멱등적으로 기존 방 반환(200)
+    GET /chat/rooms/      : 내가 참여 중인 방 목록
+    POST /chat/rooms/     : { "proposal": <id> } 로 방 생성
     """
     serializer_class = ChatRoomSerializer
-    permission_classes = [IsAuthenticated, IsRoomParticipant]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        u = self.request.user
+        user = self.request.user
         return ChatRoom.objects.filter(
-            Q(requester_id=u.id) | Q(proposer_id=u.id)
-        ).order_by("-last_msg_at", "-created_at")
+            Q(requester=user) | Q(proposer=user)
+        ).order_by("-last_msg_at", "-id")
 
-    def create(self, request, *args, **kwargs):
-        proposal_id = request.data.get("proposal")
-        if not proposal_id:
-            return Response({"detail": "proposal required"}, status=400)
-
-        # proposal에서 requester/proposer 추론
-        from DocumentApp.models import RequestRootMap
-        try:
-            rmap = RequestRootMap.objects.select_related(
-                "request__user", "root__founder"
-            ).get(pk=proposal_id)
-        except RequestRootMap.DoesNotExist:
-            return Response({"detail": "proposal not found"}, status=404)
-
-        requester_id = rmap.request.user_id
-        proposer_id = rmap.root.founder_id
-
-        # --- ⬇️ 디버깅 코드 추가 ⬇️ ---
-        print("--- [ChatRoom Create] 디버깅 ---")
-        print(f"로그인 유저 (request.user.id): {request.user.id} (타입: {type(request.user.id)})")
-        print(f"추출된 요청자 (requester_id):   {requester_id} (타입: {type(requester_id)})")
-        print(f"추출된 제안자 (proposer_id):   {proposer_id} (타입: {type(proposer_id)})")
-        print(f"로그인 유저가 참여자인가? {request.user.id in (requester_id, proposer_id)}")
-        print("---------------------------------")
-        # --- ⬆️ 디버깅 코드 추가 ⬆️ ---
-
-        # 접근 권한: 참여자만 생성 가능
-        if request.user.id not in (requester_id, proposer_id):
-            return Response(status=403)
-
-        room, created = ChatRoom.objects.get_or_create(
-            proposal_id=proposal_id,
-            defaults={"requester_id": requester_id, "proposer_id": proposer_id},
-        )
-        ser = self.get_serializer(room)
-        return Response(
-            ser.data,
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
-        )
+    def perform_create(self, serializer):
+        # serializer.create 에서 참여자/권한 체크
+        serializer.save()
 
 
-class ChatMessageViewSet(mixins.ListModelMixin,
-                         mixins.CreateModelMixin,
-                         mixins.DestroyModelMixin,
-                         viewsets.GenericViewSet):
+class ChatRoomDetailView(generics.RetrieveAPIView):
     """
-    메시지 목록/생성/소프트삭제
-    - 목록(list): /chat/rooms/{room_id}/messages/  (Nested Router)
-                  기본 is_deleted=False, 최신순 커서 페이지네이션
-    - 생성(create): TEXT or IMAGE 메시지, sender는 요청자 본인으로 강제
-    - 삭제(destroy): 보낸 사람만 is_deleted=True로 변경
+    GET /chat/rooms/<room_id>/
+    """
+    queryset = ChatRoom.objects.all()
+    serializer_class = ChatRoomSerializer
+    permission_classes = [permissions.IsAuthenticated, IsChatParticipant]
+
+
+class ChatMessageListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /chat/rooms/<room_id>/messages/
+    POST /chat/rooms/<room_id>/messages/
     """
     serializer_class = ChatMessageSerializer
-    permission_classes = [IsAuthenticated, IsRoomParticipant]
-    pagination_class = MessageCursorPagination
+    permission_classes = [permissions.IsAuthenticated, IsChatParticipant]
+
+    def get_room(self):
+        room_id = self.kwargs["room_id"]
+        room = get_object_or_404(ChatRoom, pk=room_id)
+        # object-level permission 수동 체크
+        self.check_object_permissions(self.request, room)
+        return room
 
     def get_queryset(self):
-        room_id = self.kwargs.get("room_pk") or self.request.query_params.get("room")
-        return ChatMessage.objects.filter(
-            room_id=room_id, is_deleted=False
-        ).order_by("-created_at", "-id")
+        room = self.get_room()
+        return room.messages.filter(is_deleted=False).order_by("id")
 
-    def create(self, request, *args, **kwargs):
-        room_id = self.kwargs.get("room_pk") or request.data.get("room")
-        if not room_id:
-            return Response({"detail": "room required"}, status=400)
+    def perform_create(self, serializer):
+        room = self.get_room()
+        serializer.save(room=room)
 
-        # 참여자 검증
-        try:
-            room = ChatRoom.objects.only("id", "requester_id", "proposer_id").get(pk=room_id)
-        except ChatRoom.DoesNotExist:
-            return Response({"detail": "room not found"}, status=404)
-        if request.user.id not in (room.requester_id, room.proposer_id):
-            return Response(status=403)
 
-        data = request.data.copy()
-        data["room"] = room_id
-        data["sender"] = request.user.id
+class ChatMessageDetailView(generics.RetrieveDestroyAPIView):
+    """
+    GET    /chat/messages/<msg_id>/
+    DELETE /chat/messages/<msg_id>/   -> 실제 삭제 대신 soft delete
+    """
+    queryset = ChatMessage.objects.all()
+    serializer_class = ChatMessageSerializer
+    permission_classes = [permissions.IsAuthenticated, IsChatParticipant]
 
-        serializer = self.get_serializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        msg = serializer.save()
-
-        headers = self.get_success_headers(serializer.data)
-        return Response(self.get_serializer(msg).data, status=status.HTTP_201_CREATED, headers=headers)
-
-    def destroy(self, request, *args, **kwargs):
-        instance = self.get_object()
-        if instance.sender_id != request.user.id:
-            return Response(status=status.HTTP_403_FORBIDDEN)
+    def perform_destroy(self, instance):
         instance.is_deleted = True
         instance.save(update_fields=["is_deleted"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @action(detail=False, methods=["GET"], url_path="search")
-    def search(self, request, *args, **kwargs):
-        """
-        내 방들 전체에서 본문 검색
-        GET /chat/rooms/{room_id}/messages/search/?q=...  (nested 경로에서도 동작)
-        혹은 /chat/rooms/messages/search/?q=... (비중첩 등록 시)
-        """
-        q = (request.query_params.get("q") or "").strip()
-        if not q:
-            return Response({"detail": "q required"}, status=400)
 
-        u = request.user
-        rooms = ChatRoom.objects.filter(Q(requester_id=u.id) | Q(proposer_id=u.id))
-        qs = ChatMessage.objects.filter(
-            room__in=rooms, body__icontains=q, is_deleted=False
-        ).order_by("-created_at", "-id")
+class ChatImageUploadView(APIView):
+    """
+    POST /chat/rooms/<room_id>/upload-image/
 
-        page = self.paginate_queryset(qs)
-        ser = self.get_serializer(page, many=True)
-        return self.get_paginated_response(ser.data)
+    - multipart/form-data 로 이미지 파일 업로드
+      - field name: "image"
+      - 선택적으로 "body" 에 캡션 텍스트 포함 가능
+    - media/ 아래에 파일 저장 후, IMAGE 타입 ChatMessage 생성
+    - 생성된 메시지를 WebSocket 그룹에도 브로드캐스트
+    - 응답으로 ChatMessageSerializer 결과 반환
+    """
+    permission_classes = [permissions.IsAuthenticated, IsChatParticipant]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def post(self, request, room_id):
+        # 1) 방 확인 + 참여자 권한 체크
+        room = get_object_or_404(ChatRoom, pk=room_id)
+        self.check_object_permissions(request, room)
+
+        # 2) 파일 파라미터 확인
+        image_file = request.FILES.get("image")
+        if not image_file:
+            return Response(
+                {"detail": "image 파일이 필요합니다."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # 3) 파일 저장 경로 및 저장
+        #    예: media/chat/rooms/2/원본파일명
+        path = f"chat/rooms/{room_id}/{image_file.name}"
+        saved_path = default_storage.save(path, ContentFile(image_file.read()))
+        file_url = request.build_absolute_uri(default_storage.url(saved_path))
+
+        # 4) 캡션(body) 옵션 처리
+        body = request.data.get("body") or ""
+
+        # 5) IMAGE 타입 ChatMessage 생성
+        message = ChatMessage.objects.create(
+            room=room,
+            sender=request.user,
+            msg_type=ChatMessage.Type.IMAGE,
+            body=body,
+            image_url=file_url,
+            image_size_bytes=image_file.size,
+        )
+
+        # 6) last_msg 갱신
+        room.last_msg = message
+        room.last_msg_at = message.created_at
+        room.save(update_fields=["last_msg", "last_msg_at"])
+
+        channel_layer = get_channel_layer()
+        if channel_layer is not None:
+            event_message = {
+                "id": message.id,
+                "room": message.room_id,
+                "sender": message.sender_id,
+                "msg_type": message.msg_type,
+                "body": message.body,
+                "image_url": message.image_url,
+                "image_size_bytes": message.image_size_bytes,
+                "created_at": message.created_at.isoformat(),
+                "is_deleted": message.is_deleted,
+            }
+
+            # 🔴 여기! consumer 의 group_name 규칙과 똑같이 맞춰야 함
+            group_name = f"chat_{room.id}"
+
+            async_to_sync(channel_layer.group_send)(
+                group_name,
+                {
+                    "type": "chat.message",  # ChatConsumer.chat_message 로 라우트
+                    "message": event_message,
+                },
+            )
+
+        # 8) HTTP 응답 (업로더 쪽은 이걸 사용해서 UI 갱신해도 됨)
+        serializer = ChatMessageSerializer(message)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
