@@ -1,11 +1,19 @@
-from rest_framework.permissions import BasePermission
+from rest_framework import permissions
+from .models import ChatRoom, ChatMessage
 
-class IsRoomParticipant(BasePermission):
+
+class IsChatParticipant(permissions.BasePermission):
+    """
+    ChatRoom/ChatMessage 의 requester 또는 proposer 인지 확인
+    """
+
     def has_object_permission(self, request, view, obj):
-        u = request.user
-        if hasattr(obj, "requester"):  # ChatRoom
-            return obj.requester_id == u.id or obj.proposer_id == u.id
-        if hasattr(obj, "room"):       # ChatMessage
-            r = obj.room
-            return r.requester_id == u.id or r.proposer_id == u.id
-        return False
+        user = request.user
+        if isinstance(obj, ChatRoom):
+            room = obj
+        elif isinstance(obj, ChatMessage):
+            room = obj.room
+        else:
+            return False
+
+        return user.is_authenticated and user in (room.requester, room.proposer)

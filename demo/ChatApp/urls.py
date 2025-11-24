@@ -1,10 +1,19 @@
-from rest_framework_nested import routers
-from .views import ChatRoomViewSet, ChatMessageViewSet
+from django.urls import path
 
-router = routers.SimpleRouter()
-router.register(r"rooms", ChatRoomViewSet, basename="room")
+from .views import (
+    ChatRoomListCreateView,
+    ChatRoomDetailView,
+    ChatMessageListCreateView,
+    ChatMessageDetailView,
+    ChatImageUploadView,
+)
 
-nested = routers.NestedSimpleRouter(router, r"rooms", lookup="room")
-nested.register(r"messages", ChatMessageViewSet, basename="room-messages")
+app_name = "chat"
 
-urlpatterns = router.urls + nested.urls
+urlpatterns = [
+    path("rooms/", ChatRoomListCreateView.as_view(), name="room-list"),
+    path("rooms/<int:pk>/", ChatRoomDetailView.as_view(), name="room-detail"),
+    path("rooms/<int:room_id>/messages/", ChatMessageListCreateView.as_view(), name="message-list"),
+    path("messages/<int:pk>/", ChatMessageDetailView.as_view(), name="message-detail"),
+    path("rooms/<int:room_id>/upload-image/", ChatImageUploadView.as_view())
+]
