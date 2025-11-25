@@ -114,7 +114,7 @@ class LoginView(APIView):
             "access_token",
             access,
             httponly=True,
-            samesite="None",
+            samesite="Lax",
             secure=True,
             path="/",
         )
@@ -122,7 +122,7 @@ class LoginView(APIView):
             "refresh_token",
             refresh,
             httponly=True,
-            samesite="None",
+            samesite="Lax",
             secure=True,
             path="/",
         )
