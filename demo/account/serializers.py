@@ -166,6 +166,10 @@ class LocalProfileSerializer(serializers.ModelSerializer):
     interests = serializers.SlugRelatedField(
         slug_field="slug", many=True, queryset=Interest.objects.all(), required=False
     )
+    display_name = serializers.CharField(
+        source="user.display_name",
+        required=False,
+    )
 
     class Meta:
         model = LocalProfile
@@ -183,6 +187,11 @@ class LocalProfileSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         interests = validated_data.pop("interests", [])
         user = self.context["request"].user
+        user_data = validated_data.pop("user", {})
+        display_name = user_data.get("display_name")
+        if display_name is not None and user.display_name != display_name:
+            user.display_name = display_name
+            user.save(update_fields=["display_name"])
         obj, created = LocalProfile.objects.get_or_create(
             user=user, defaults=validated_data
         )
@@ -196,6 +205,11 @@ class LocalProfileSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         interests = validated_data.pop("interests", None)
+        user_data = validated_data.pop("user", {})
+        display_name = user_data.get("display_name")
+        if display_name is not None and instance.user.display_name != display_name:
+            instance.user.display_name = display_name
+            instance.user.save(update_fields=["display_name"])
         for k, v in validated_data.items():
             setattr(instance, k, v)
         instance.save()
@@ -205,6 +219,10 @@ class LocalProfileSerializer(serializers.ModelSerializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    display_name = serializers.CharField(
+        source="user.display_name",
+        required=False,
+    )
     interests = serializers.SlugRelatedField(
         slug_field="slug", many=True, queryset=Interest.objects.all(), required=False
     )
@@ -224,6 +242,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         interests = validated_data.pop("interests", [])
         user = self.context["request"].user
+        user_data = validated_data.pop("user", {})
+        display_name = user_data.get("display_name")
+        if display_name is not None and user.display_name != display_name:
+            user.display_name = display_name
+            user.save(update_fields=["display_name"])
         obj, created = UserProfile.objects.get_or_create(
             user=user, defaults=validated_data
         )
@@ -237,6 +260,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         interests = validated_data.pop("interests", None)
+        user_data = validated_data.pop("user", {})
+        display_name = user_data.get("display_name")
+        if display_name is not None and instance.user.display_name != display_name:
+            instance.user.display_name = display_name
+            instance.user.save(update_fields=["display_name"])
         for k, v in validated_data.items():
             setattr(instance, k, v)
         instance.save()
