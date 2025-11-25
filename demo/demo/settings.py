@@ -114,19 +114,23 @@ DATABASES = {
         },
     }
 }
-# # 이메일 설정 (Gmail)
-# EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-# EMAIL_HOST = "smtp.gmail.com"
-# EMAIL_PORT = 587
-# EMAIL_USE_TLS = True
-# EMAIL_HOST_USER = config("EMAIL_HOST_USER")
-# EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")
-# DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
+
+# ---- EMAIL: AWS SES SMTP ----
 EMAIL_BACKEND = config(
-    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
+    "EMAIL_BACKEND",
+    default="django.core.mail.backends.smtp.EmailBackend",
 )
-DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="dev@example.com")
+
+EMAIL_HOST = config("EMAIL_HOST")  # email-smtp.us-east-1.amazonaws.com
+EMAIL_PORT = config("EMAIL_PORT", cast=int, default=587)
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", cast=bool, default=True)
+
+EMAIL_HOST_USER = config("EMAIL_HOST_USER")  # SES SMTP 유저
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD")  # SES SMTP 패스워드
+
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL")
+SERVER_EMAIL = config("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
 
 # Password validation
 # https://docs.djangoproject.com/en/3.2/ref/settings/#auth-password-validators
