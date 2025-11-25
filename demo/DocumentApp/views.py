@@ -47,7 +47,8 @@ class RootListCreateView(generics.ListCreateAPIView):
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["place", "founder"]
-    search_fields = ["travel_type", "experience"]
+    # Root도 ThemeTag ManyToMany를 사용하므로 name 기준 검색
+    search_fields = ["travel_type__name", "experience"]
     ordering_fields = ["created_at", "modified_at"]
     ordering = ["-created_at"]
 
@@ -62,7 +63,7 @@ class RootRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsOwnerOrReadOnly]
 
 
-# -------- ThemeTag (read-only list) --------
+# -------- ThemeTag (읽기 전용) --------
 class ThemeTagListView(generics.ListAPIView):
     """
     여행 테마 태그 목록 조회

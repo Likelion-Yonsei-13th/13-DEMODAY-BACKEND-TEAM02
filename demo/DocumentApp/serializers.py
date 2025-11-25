@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import Request, Root, ThemeTag
 
 
-# -------- ThemeTag (for read-only exposure) --------
+# -------- ThemeTag (공통 태그 표현용) --------
 class ThemeTagSerializer(serializers.ModelSerializer):
     class Meta:
         model = ThemeTag
@@ -15,14 +15,13 @@ class RequestSerializer(serializers.ModelSerializer):
     # 사용자 식별은 읽기 전용으로 uuid(pk)만 노출
     user = serializers.SerializerMethodField(read_only=True)
 
-    # 응답용: 선택된 모든 태그 정보 (level1/2/3 포함)
+    # 응답용: 사용자가 선택한 모든 여행 태그 정보 (level1/2/3 포함)
     travel_type = ThemeTagSerializer(many=True, read_only=True)
 
-    # 요청용: 태그 id 리스트 (level1/2/3 전부 포함해서 보내면 됨)
-    # ex) [ level1("여유로운"), level2("산책이 있는"), level3("강변 산책") ]
+    # 요청용: 태그 id 리스트
     travel_type_ids = serializers.PrimaryKeyRelatedField(
         many=True,
-        source="travel_type",          # 실제 모델 필드명
+        source="travel_type",
         queryset=ThemeTag.objects.all(),
         write_only=True,
         required=False,
@@ -38,8 +37,8 @@ class RequestSerializer(serializers.ModelSerializer):
             "date",
             "number_of_people",
             "guidance",
-            "travel_type",      # read-only (ThemeTagSerializer[])
-            "travel_type_ids",  # write-only (id list)
+            "travel_type",
+            "travel_type_ids",
             "experience",
             "is_public_profile",
             "created_at",
@@ -47,7 +46,6 @@ class RequestSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user", "created_at"]
 
     def get_user(self, obj):
-        # 커스텀 User PK는 uuid → obj.user_id가 uuid 값
         return {"uuid": str(obj.user_id)}
 
     def validate_number_of_people(self, v):
@@ -56,14 +54,38 @@ class RequestSerializer(serializers.ModelSerializer):
         return v
 
     def create(self, validated_data):
-        # 생성자는 항상 현재 로그인한 USER
+        # travel_type (ManyToMany) 를 분리해서 처리
+        tags = validated_data.pop("travel_type", [])
         validated_data["user"] = self.context["request"].user
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+        if tags:
+            instance.travel_type.set(tags)
+        return instance
+
+    def update(self, instance, validated_data):
+        tags = validated_data.pop("travel_type", None)
+        instance = super().update(instance, validated_data)
+        if tags is not None:
+            instance.travel_type.set(tags)
+        return instance
 
 
 # -------- Root --------
 class RootSerializer(serializers.ModelSerializer):
     founder = serializers.SerializerMethodField(read_only=True)
+
+    # 응답용: 루트에 연결된 모든 여행 태그 정보
+    travel_type = ThemeTagSerializer(many=True, read_only=True)
+
+    # 요청용: 태그 id 리스트
+    travel_type_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        source="travel_type",
+        queryset=ThemeTag.objects.all(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+    )
 
     class Meta:
         model = Root
@@ -74,6 +96,7 @@ class RootSerializer(serializers.ModelSerializer):
             "number_of_people",
             "guidance",
             "travel_type",
+            "travel_type_ids",
             "experience",
             "created_at",
             "modified_at",
@@ -89,5 +112,16 @@ class RootSerializer(serializers.ModelSerializer):
         return v
 
     def create(self, validated_data):
+        tags = validated_data.pop("travel_type", [])
         validated_data["founder"] = self.context["request"].user
-        return super().create(validated_data)
+        instance = super().create(validated_data)
+        if tags:
+            instance.travel_type.set(tags)
+        return instance
+
+    def update(self, instance, validated_data):
+        tags = validated_data.pop("travel_type", None)
+        instance = super().update(instance, validated_data)
+        if tags is not None:
+            instance.travel_type.set(tags)
+        return instance

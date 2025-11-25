@@ -11,7 +11,7 @@ class Request(models.Model):  # 제안 요청서
         related_name="requests",
     )
     place = models.ForeignKey(
-        "PlaceApp.TravelPlace",
+        "PlaceApp.TravelPlace", 
         on_delete=models.PROTECT,
         related_name="requests",
     )
@@ -22,7 +22,7 @@ class Request(models.Model):  # 제안 요청서
     )                                                                   # NOT NULL
     guidance = models.BooleanField(default=True)                        # DEFAULT TRUE
 
-    # 사용자가 선택한 모든 여행 테마 태그 조합 (level1/2/3 포함 가능)
+    # 사용자가 선택한 모든 여행 테마 태그 (level1/2/3 포함 가능)
     travel_type = models.ManyToManyField(
         "ThemeTag",
         blank=True,
@@ -62,7 +62,15 @@ class Root(models.Model):  # 여행 루트
         validators=[MinValueValidator(1)]
     )                                                                   # NOT NULL
     guidance = models.BooleanField(default=True)                        # DEFAULT TRUE
-    travel_type = models.CharField(max_length=512, null=True, blank=True)   # NULL 허용
+
+    # 루트에 연결된 여행 테마 태그 (level1/2/3 포함 가능)
+    travel_type = models.ManyToManyField(
+        "ThemeTag",
+        blank=True,
+        related_name="roots",
+        help_text="루트에 연결된 여행 테마 태그 (level1/2/3 포함 가능)",
+    )
+
     experience = models.CharField(max_length=255, null=True, blank=True)    # NULL 허용
     created_at = models.DateTimeField(auto_now_add=True)                # NOT NULL
     modified_at = models.DateTimeField(auto_now=True)                   # NOT NULL
