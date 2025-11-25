@@ -1,11 +1,33 @@
 from rest_framework import serializers
-from .models import Request, Root
+from .models import Request, Root, ThemeTag
+
+
+# -------- ThemeTag (for read-only exposure) --------
+class ThemeTagSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ThemeTag
+        fields = ["id", "name", "level", "parent"]
+        read_only_fields = ["id", "level", "parent"]
 
 
 # -------- Request --------
 class RequestSerializer(serializers.ModelSerializer):
     # 사용자 식별은 읽기 전용으로 uuid(pk)만 노출
     user = serializers.SerializerMethodField(read_only=True)
+
+    # 응답용: 선택된 모든 태그 정보 (level1/2/3 포함)
+    travel_type = ThemeTagSerializer(many=True, read_only=True)
+
+    # 요청용: 태그 id 리스트 (level1/2/3 전부 포함해서 보내면 됨)
+    # ex) [ level1("여유로운"), level2("산책이 있는"), level3("강변 산책") ]
+    travel_type_ids = serializers.PrimaryKeyRelatedField(
+        many=True,
+        source="travel_type",          # 실제 모델 필드명
+        queryset=ThemeTag.objects.all(),
+        write_only=True,
+        required=False,
+        allow_empty=True,
+    )
 
     class Meta:
         model = Request
@@ -16,7 +38,8 @@ class RequestSerializer(serializers.ModelSerializer):
             "date",
             "number_of_people",
             "guidance",
-            "travel_type",
+            "travel_type",      # read-only (ThemeTagSerializer[])
+            "travel_type_ids",  # write-only (id list)
             "experience",
             "is_public_profile",
             "created_at",
