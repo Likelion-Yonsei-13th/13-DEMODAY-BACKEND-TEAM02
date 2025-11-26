@@ -28,5 +28,9 @@ urlpatterns = [
     path("story/", include("StoryApp.urls")),
 ]
 
+# DEBUG 모드가 아니더라도 미디어 파일 서빙 (소규모 프로젝트용)
 if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+else:
+    # 프로덕션에서도 메디어 파일 서빙
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
