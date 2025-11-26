@@ -216,7 +216,13 @@ CORS_ALLOWED_ORIGINS = [
     "https://d-tour.kr",
 ]
 
-CORS_ALLOW_CREDENTIALS = True  # 쿠키 허용
+SECURE_SSL_REDIRECT = False  # HTTP 요청을 HTTPS로 리디렉트하는 것은 Nginx에서 이미 처리하므로 따로 진행하지 않음
+SECURE_PROXY_SSL_HEADER = (
+    "HTTP_X_FORWARDED_PROTO",
+    "https",
+)  # Proxy 사용 시 HTTPS 유지
+CSRF_COOKIE_SECURE = True  # CSRF 쿠키를 HTTPS에서만 사용
+SESSION_COOKIE_SECURE = True  # 세션 쿠키를 HTTPS에서만 사용
 
 # CSRF 신뢰 도메인
 CSRF_TRUSTED_ORIGINS = [
