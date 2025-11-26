@@ -34,6 +34,8 @@ ALLOWED_HOSTS = [
     "44.200.3.215",  # EC2 public IP
     "localhost",
     "127.0.0.1",
+    "d-tour.kr",
+    "www.d-tour.kr",
 ]
 
 
