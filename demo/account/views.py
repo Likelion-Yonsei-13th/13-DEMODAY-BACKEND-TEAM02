@@ -105,16 +105,18 @@ class LoginView(APIView):
                 "message": "로그인 성공",
                 "role": user.role,
                 "next_step": compute_next_step(user),
+                "access_token": access,  # Cross-Origin을 위해 토큰 반환
+                "refresh_token": refresh,
             },
             status=200,
         )
 
-        # HttpOnly 쿠키 저장 (운영에서는 secure=True 권장)
+        # HttpOnly 쿠키 저장 (로컬 개발환경에서는 samesite="Lax" 사용)
         res.set_cookie(
             "access_token",
             access,
             httponly=True,
-            samesite="None",
+            samesite="Lax",
             secure=False,
             path="/",
         )
@@ -122,7 +124,7 @@ class LoginView(APIView):
             "refresh_token",
             refresh,
             httponly=True,
-            samesite="None",
+            samesite="Lax",
             secure=False,
             path="/",
         )
