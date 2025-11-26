@@ -232,4 +232,5 @@ CSRF_TRUSTED_ORIGINS = [
     "https://www.d-tour.kr",
     "https://d-tour.kr",
     "https://api.d-tour.kr",
+    "https://13-demoday-team-02.vercel.app",
 ]
