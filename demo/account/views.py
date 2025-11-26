@@ -114,16 +114,16 @@ class LoginView(APIView):
             "access_token",
             access,
             httponly=True,
-            samesite="Lax",
-            secure=True,
+            samesite="None",
+            secure=False,
             path="/",
         )
         res.set_cookie(
             "refresh_token",
             refresh,
             httponly=True,
-            samesite="Lax",
-            secure=True,
+            samesite="None",
+            secure=False,
             path="/",
         )
         return res
