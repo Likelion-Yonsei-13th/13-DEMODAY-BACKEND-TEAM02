@@ -34,8 +34,7 @@ ALLOWED_HOSTS = [
     "44.200.3.215",  # EC2 public IP
     "localhost",
     "127.0.0.1",
-    "d-tour.kr",
-    "www.d-tour.kr",
+    "api.d-tour.kr",  # 백엔드 API 서브도메인
 ]
 
 
@@ -212,6 +211,8 @@ MEDIA_ROOT = BASE_DIR / "media"
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  # Next.js 개발 서버
     "http://127.0.0.1:3000",
+    "https://www.d-tour.kr",  # 프론트엔드 프로덕션
+    "https://d-tour.kr",
 ]
 
 CORS_ALLOW_CREDENTIALS = True  # 쿠키 허용
@@ -220,4 +221,7 @@ CORS_ALLOW_CREDENTIALS = True  # 쿠키 허용
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://www.d-tour.kr",
+    "https://d-tour.kr",
+    "https://api.d-tour.kr",
 ]
