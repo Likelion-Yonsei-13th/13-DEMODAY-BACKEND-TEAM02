@@ -34,7 +34,8 @@ ALLOWED_HOSTS = [
     "44.200.3.215",  # EC2 public IP
     "localhost",
     "127.0.0.1",
-    "api.d-tour.kr",  # 백엔드 API 서브도메인
+    "d-tour.kr",
+    "www.d-tour.kr",
 ]
 
 
