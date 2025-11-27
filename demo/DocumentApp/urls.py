@@ -4,6 +4,7 @@ from .views import (
     RequestRetrieveUpdateDestroyView,
     RootListCreateView,
     RootRetrieveUpdateDestroyView,
+    ThemeTagListView,
 )
 
 urlpatterns = [
@@ -14,4 +15,7 @@ urlpatterns = [
     # Roots
     path("roots/", RootListCreateView.as_view(), name="root-list-create"),
     path("roots/<int:pk>/", RootRetrieveUpdateDestroyView.as_view(), name="root-detail"),
+
+    # Theme Tags (읽기 전용 리스트)
+    path("theme-tags/", ThemeTagListView.as_view(), name="theme-tag-list"),
 ]
