@@ -99,18 +99,24 @@ class StoryListCreateView(generics.ListCreateAPIView):
 
 
 # --------------------------
-# 글 상세
+# 글 상세/수정/삭제
 # --------------------------
-class StoryDetailView(generics.RetrieveAPIView):
+class StoryDetailView(generics.RetrieveUpdateDestroyAPIView):
     """
     GET /story/stories/<id>/
+    PATCH /story/stories/<id>/
+    DELETE /story/stories/<id>/
     """
 
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsAuthorOrReadOnly]
     queryset = TravelStory.objects.filter(is_public=True).select_related(
         "place", "author"
     )
-    serializer_class = StoryDetailSerializer
+    
+    def get_serializer_class(self):
+        if self.request.method in ["PATCH", "PUT"]:
+            return StoryCreateSerializer
+        return StoryDetailSerializer
 
 
 # --------------------------
