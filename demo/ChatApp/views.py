@@ -160,3 +160,54 @@ class ChatImageUploadView(APIView):
         # 8) HTTP 응답 (업로더 쪽은 이걸 사용해서 UI 갱신해도 됨)
         serializer = ChatMessageSerializer(message)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ChatRoomFinishView(generics.UpdateAPIView):
+    """
+    PATCH /chat/rooms/<room_id>/finish/
+
+    - 여행 매칭 확정 → RequestRootMap.is_finished = True
+    - WebSocket 참여자들에게도 알림
+    """
+    queryset = ChatRoom.objects.all()
+    permission_classes = [permissions.IsAuthenticated, IsChatParticipant]
+
+    def patch(self, request, *args, **kwargs):
+        room = self.get_object()
+
+        # 1) RequestRootMap 가져오기 (여행 요청서)
+        request_root = room.proposal   # ChatRoom(proposal FK) 구조 기준
+
+        if not request_root:
+            return Response(
+                {"detail": "RequestRootMap(proposal) 이 존재하지 않습니다."},
+                status=400
+            )
+
+        # 2) is_finished 값을 True 로 변경
+        request_root.is_finished = True
+        request_root.save(update_fields=["is_finished"])
+
+        # 3) WebSocket 참여자들에게 push
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f"chat_{room.id}",
+            {
+                "type": "chat.room_status",
+                "message": {
+                    "room_id": room.id,
+                    "request_root_id": request_root.id,
+                    "is_finished": True,
+                }
+            }
+        )
+
+        return Response(
+            {
+                "detail": "RequestRootMap marked as finished.",
+                "room_id": room.id,
+                "request_root_id": request_root.id
+            },
+            status=status.HTTP_200_OK
+        )
+
