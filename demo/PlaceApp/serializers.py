@@ -10,7 +10,8 @@ from .models import (
 
 
 class TravelPlaceSerializer(serializers.ModelSerializer):
-    photo = serializers.SerializerMethodField()
+    photo_url = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    photo = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = TravelPlace
@@ -18,6 +19,7 @@ class TravelPlaceSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "photo",
+            "photo_url",
             "country",
             "state",
             "city",
@@ -27,12 +29,28 @@ class TravelPlaceSerializer(serializers.ModelSerializer):
         ]
     
     def get_photo(self, obj):
+        # photo_url이 있으면 우선 반환
+        if obj.photo_url:
+            return obj.photo_url
+        
+        # photo ImageField가 있으면 반환
         if obj.photo:
             request = self.context.get('request')
             if request:
                 return request.build_absolute_uri(obj.photo.url)
             return obj.photo.url
+        
         return ""
+    
+    def create(self, validated_data):
+        photo_url = validated_data.pop('photo_url', None)
+        
+        # photo_url을 모델의 photo_url 필드에 저장
+        if photo_url:
+            validated_data['photo_url'] = photo_url
+        
+        instance = super().create(validated_data)
+        return instance
 
 
 class TravelPlaceListSerializerFlat(serializers.ModelSerializer):

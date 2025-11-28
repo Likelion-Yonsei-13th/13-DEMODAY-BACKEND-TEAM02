@@ -12,6 +12,7 @@ class TravelPlace(models.Model):
 
     name = models.CharField(max_length=50)
     photo = models.ImageField(upload_to='place_images/', blank=True, null=True)
+    photo_url = models.CharField(max_length=500, blank=True, default="")  # URL 문자열 저장용
 
     # 위치 정보 (나라 / 시도 / 구 / 동)
     country = models.CharField(max_length=50, default="", blank=True)
