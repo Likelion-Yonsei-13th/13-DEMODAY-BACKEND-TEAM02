@@ -1,5 +1,14 @@
 from rest_framework import serializers
 from .models import Request, Root, ThemeTag
+from PlaceApp.models import TravelPlace
+
+
+# -------- TravelPlace (여행지 정보) --------
+class TravelPlaceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TravelPlace
+        fields = ["id", "name", "country", "state", "city", "district"]
+        read_only_fields = ["id"]
 
 
 # -------- ThemeTag (공통 태그 표현용) --------
@@ -14,6 +23,14 @@ class ThemeTagSerializer(serializers.ModelSerializer):
 class RequestSerializer(serializers.ModelSerializer):
     # 사용자 식별은 읽기 전용으로 uuid(pk)만 노출
     user = serializers.SerializerMethodField(read_only=True)
+
+    # 여행지 정보 nested 반환 (GET), 작성 시는 ID만 (POST/PUT)
+    place = TravelPlaceSerializer(read_only=True)
+    place_id = serializers.PrimaryKeyRelatedField(
+        queryset=TravelPlace.objects.all(),
+        source="place",
+        write_only=True,
+    )
 
     # 응답용: 사용자가 선택한 모든 여행 태그 정보 (level1/2/3 포함)
     travel_type = ThemeTagSerializer(many=True, read_only=True)
@@ -34,7 +51,10 @@ class RequestSerializer(serializers.ModelSerializer):
             "id",
             "user",
             "place",
+            "place_id",
+            "title",
             "date",
+            "end_date",
             "number_of_people",
             "guidance",
             "travel_type",
