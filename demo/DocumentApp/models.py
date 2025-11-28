@@ -77,6 +77,11 @@ class Root(models.Model):  # 여행 루트
     )
 
     experience = models.CharField(max_length=255, null=True, blank=True)    # NULL 허용
+    
+    # 평점 관련 필드
+    average_rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)  # 0.00 ~ 5.00
+    rating_count = models.PositiveIntegerField(default=0)  # 평점 개수
+    
     created_at = models.DateTimeField(auto_now_add=True)                # NOT NULL
     modified_at = models.DateTimeField(auto_now=True)                   # NOT NULL
 
@@ -121,6 +126,40 @@ class RequestRootMap(models.Model):  # 요청서-루트 연결(제안)
         return f"RequestRootMap#{self.pk} req={self.request_id} root={self.root_id}"
 
 
+class Rating(models.Model):  # 제안서 평점
+    id = models.BigAutoField(primary_key=True)
+    root = models.ForeignKey(
+        Root,
+        on_delete=models.CASCADE,
+        related_name="ratings",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="ratings",
+    )  # 비로그인 경우도 평점 가능
+    rating = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )  # 1 ~ 5점
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "rating"
+        # 사용자별 제안서별 한 번만 평점 가능
+        unique_together = ("root", "user")
+        indexes = [
+            models.Index(fields=["root", "created_at"]),
+            models.Index(fields=["user", "created_at"]),
+        ]
+
+    def __str__(self):
+        user_str = f"user={self.user_id}" if self.user else "anonymous"
+        return f"Rating#{self.pk} root={self.root_id} {user_str} rating={self.rating}"
+
+
 class ThemeTag(models.Model):
     """
     여행 테마 태그 보관용 테이블
@@ -136,7 +175,7 @@ class ThemeTag(models.Model):
         max_length=100,
         null=False,
         blank=False,
-        help_text='태그 이름 (예: "여유로운 여행", "숨겨진 로컬 스팟")',
+        help_text='태그 이름 (예: "여유로운 여행", "숨결된 로컬 스팩")',
     )
 
     level = models.PositiveSmallIntegerField(
@@ -144,7 +183,7 @@ class ThemeTag(models.Model):
         help_text="계층 레벨 (1=대분류, 2=중분류, 3=소분류)",
     )
 
-    # DB 컬럼명은 parent_id 로 생성됨
+    # DB 컴럼명은 parent_id 로 생성됨
     parent = models.ForeignKey(
         "self",
         on_delete=models.PROTECT,

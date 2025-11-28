@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Request, Root, ThemeTag
+from .models import Request, Root, ThemeTag, Rating
 from PlaceApp.models import TravelPlace
 
 
@@ -142,10 +142,12 @@ class RootSerializer(serializers.ModelSerializer):
             "travel_type",
             "travel_type_ids",
             "experience",
+            "average_rating",
+            "rating_count",
             "created_at",
             "modified_at",
         ]
-        read_only_fields = ["id", "founder", "created_at", "modified_at"]
+        read_only_fields = ["id", "founder", "average_rating", "rating_count", "created_at", "modified_at"]
 
     def get_founder(self, obj):
         # 프로필에서 photo_url 가져오기
@@ -178,3 +180,20 @@ class RootSerializer(serializers.ModelSerializer):
         if tags is not None:
             instance.travel_type.set(tags)
         return instance
+
+
+# -------- Rating --------
+class RatingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Rating
+        fields = ["id", "root", "user", "rating", "created_at", "updated_at"]
+        read_only_fields = ["id", "user", "created_at", "updated_at"]
+
+    def create(self, validated_data):
+        # 로그인 사용자를 user로 설정 (비로그인 허용 시 None)
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            validated_data["user"] = request.user
+        else:
+            validated_data["user"] = None
+        return super().create(validated_data)
