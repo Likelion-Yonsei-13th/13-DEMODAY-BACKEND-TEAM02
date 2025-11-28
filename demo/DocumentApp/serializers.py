@@ -101,6 +101,9 @@ class RootSerializer(serializers.ModelSerializer):
         source="place",
         write_only=True,
     )
+    
+    # photo는 이미 업로드된 이미지 URL 문자열로 받음
+    photo = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     # 응답용: 루트에 연결된 모든 여행 태그 정보
     travel_type = ThemeTagSerializer(many=True, read_only=True)
