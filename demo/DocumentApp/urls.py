@@ -6,6 +6,7 @@ from .views import (
     RootRetrieveUpdateDestroyView,
     ThemeTagListView,
 )
+from .upload_views import ImageUploadView
 
 urlpatterns = [
     # Requests
@@ -18,4 +19,7 @@ urlpatterns = [
 
     # Theme Tags (읽기 전용 리스트)
     path("theme-tags/", ThemeTagListView.as_view(), name="theme-tag-list"),
+
+    # Image Upload
+    path("upload-image/", ImageUploadView.as_view(), name="root-image-upload"),
 ]
