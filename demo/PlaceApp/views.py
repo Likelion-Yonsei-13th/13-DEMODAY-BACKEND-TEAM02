@@ -40,6 +40,26 @@ class TravelPlaceListCreateView(generics.ListCreateAPIView):
         if self.request.method == "POST":
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
+    
+    def get_queryset(self):
+        qs = super().get_queryset()
+        
+        params = self.request.query_params
+        country = params.get("country")
+        state = params.get("state")
+        city = params.get("city")
+        district = params.get("district")
+        
+        if country:
+            qs = qs.filter(country=country)
+        if state:
+            qs = qs.filter(state=state)
+        if city:
+            qs = qs.filter(city=city)
+        if district:
+            qs = qs.filter(district=district)
+        
+        return qs.order_by("name")
 
 
 class TravelPlaceCreateByLocalView(APIView):
