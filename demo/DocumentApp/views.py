@@ -1,7 +1,6 @@
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, filters
 from rest_framework.permissions import AllowAny, IsAuthenticated
-from django.db.models import Avg
 
 from .models import Request, Root, ThemeTag, Rating
 from .serializers import RequestSerializer, RootSerializer, ThemeTagSerializer, RatingSerializer
@@ -42,11 +41,7 @@ class RootListCreateView(generics.ListCreateAPIView):
     GET: 누구나(비로그인 포함) 조회 가능
     POST: 로그인 + role == LOCAL만 생성 가능
     """
-    queryset = (
-        Root.objects.select_related("founder", "place")
-        .annotate(average_rating=Avg("ratings__rating"))
-        .all()
-    )
+    queryset = Root.objects.select_related("founder", "place").all()
     serializer_class = RootSerializer
     permission_classes = [CanCreateRoot]  # SAFE_METHODS 허용 + LOCAL만 POST 허용
 
@@ -63,11 +58,7 @@ class RootRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     GET: 모두 허용
     PATCH/PUT/DELETE: 소유자 또는 staff만
     """
-    queryset = (
-        Root.objects.select_related("founder", "place")
-        .annotate(average_rating=Avg("ratings__rating"))
-        .all()
-    )
+    queryset = Root.objects.select_related("founder", "place").all()
     serializer_class = RootSerializer
     permission_classes = [IsOwnerOrReadOnly]
 
