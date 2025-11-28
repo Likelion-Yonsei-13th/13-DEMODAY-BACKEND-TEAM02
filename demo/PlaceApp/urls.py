@@ -2,6 +2,7 @@ from django.urls import path
 
 from .views import (
     TravelPlaceListCreateView,
+    TravelPlaceCreateByLocalView,
     TravelPlaceDetailView,
     TravelPlaceLikeView,
     LikedPlaceListView,
@@ -19,6 +20,7 @@ from .views import (
 urlpatterns = [
     # 여행지 마스터
     path("places/", TravelPlaceListCreateView.as_view()),
+    path("places/create-by-local/", TravelPlaceCreateByLocalView.as_view()),
     path("places/<int:pk>/", TravelPlaceDetailView.as_view()),
     path("places/by-region/", PlacesByRegionView.as_view()),
     # 좋아요

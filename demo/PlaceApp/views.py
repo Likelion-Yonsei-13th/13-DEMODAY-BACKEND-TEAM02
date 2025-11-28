@@ -41,6 +41,21 @@ class TravelPlaceListCreateView(generics.ListCreateAPIView):
             return [permissions.IsAdminUser()]
         return [permissions.AllowAny()]
 
+
+class TravelPlaceCreateByLocalView(APIView):
+    """
+    POST /place/places/create-by-local/
+    - 로컬 가이드가 새 여행지를 생성
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = TravelPlaceSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
     def get_queryset(self):
         qs = super().get_queryset()
 
