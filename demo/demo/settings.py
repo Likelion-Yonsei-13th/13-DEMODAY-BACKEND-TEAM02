@@ -216,7 +216,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "https://www.d-tour.kr",  # 프론트엔드 프로덕션
     "https://d-tour.kr",
-    "https://13-demoday-team-02.vercel.app",
+    "https://13-demoday-frontend-team-02.vercel.app",
 ]
 
 SECURE_SSL_REDIRECT = False  # HTTP 요청을 HTTPS로 리디렉트하는 것은 Nginx에서 이미 처리하므로 따로 진행하지 않음
@@ -234,5 +234,5 @@ CSRF_TRUSTED_ORIGINS = [
     "https://www.d-tour.kr",
     "https://d-tour.kr",
     "https://api.d-tour.kr",
-    "https://13-demoday-team-02.vercel.app",
+    "https://13-demoday-frontend-team-02.vercel.app",
 ]
