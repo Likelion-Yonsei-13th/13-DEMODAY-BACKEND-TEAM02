@@ -24,10 +24,8 @@ class IsAuthorOrReadOnly(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in ("GET", "HEAD", "OPTIONS"):
             return True
-        return (
-            getattr(obj, "author_id", None) == getattr(request.user, "id", None)
-            or request.user.is_staff
-        )
+        # obj.author는 User 인스턴스, request.user와 직접 비교
+        return obj.author == request.user or request.user.is_staff
 
 
 # --------------------------
