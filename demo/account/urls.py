@@ -4,6 +4,7 @@ from .views import (
     VerifyEmailView,
     LoginView,
     LogoutView,
+    MeView,
     # onboarding
     OnboardingNextView,
     InterestListView,
@@ -21,6 +22,7 @@ urlpatterns = [
     path("verify-email/<str:token>/", VerifyEmailView.as_view(), name="verify-email"),
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
+    path("me/", MeView.as_view(), name="me"),
     # onboarding flow
     path("onboarding/next/", OnboardingNextView.as_view()),
     path("interests/", InterestListView.as_view()),

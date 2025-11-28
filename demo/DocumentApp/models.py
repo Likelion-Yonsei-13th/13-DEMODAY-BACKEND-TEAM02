@@ -16,7 +16,9 @@ class Request(models.Model):  # 제안 요청서
         related_name="requests",
     )
 
-    date = models.DateField()                                           # NOT NULL
+    title = models.CharField(max_length=100, null=True, blank=True)     # 제안서 제목
+    date = models.DateField()                                           # 시작 날짜
+    end_date = models.DateField(null=True, blank=True)                  # 종료 날짜 (선택사항)
     number_of_people = models.PositiveIntegerField(
         validators=[MinValueValidator(1)]
     )                                                                   # NOT NULL

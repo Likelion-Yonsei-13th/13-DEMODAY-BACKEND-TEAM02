@@ -140,6 +140,24 @@ class LogoutView(APIView):
         return res
 
 
+class MeView(APIView):
+    """현재 로그인한 사용자 정보 조회"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        return Response(
+            {
+                "uuid": user.uuid,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role,
+                "display_name": user.display_name,
+            },
+            status=200,
+        )
+
+
 # ------------------------
 # 역할별 권한
 # ------------------------
