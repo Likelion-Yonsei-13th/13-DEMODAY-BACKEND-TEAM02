@@ -102,3 +102,6 @@ class ChatConsumer(AsyncJsonWebsocketConsumer):
         group_send 의 "type": "chat.message" 가 오면 호출되는 핸들러
         """
         await self.send_json(event["message"])
+
+    async def chat_room_status(self, event):
+        await self.send_json(event["message"])
