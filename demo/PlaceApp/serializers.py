@@ -71,11 +71,17 @@ class TravelPlaceListSerializerFlat(serializers.ModelSerializer):
         )
     
     def get_photo(self, obj):
+        # photo_url이 있으면 우선 반환
+        if obj.photo_url:
+            return obj.photo_url
+        
+        # photo ImageField가 있으면 반환
         if obj.photo:
             request = self.context.get('request')
             if request:
                 return request.build_absolute_uri(obj.photo.url)
             return obj.photo.url
+        
         return ""
 
 
