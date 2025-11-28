@@ -66,7 +66,16 @@ class RequestSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user", "created_at"]
 
     def get_user(self, obj):
-        return {"uuid": str(obj.user_id)}
+        # 프로필에서 photo_url 가져오기
+        photo_url = ""
+        if hasattr(obj.user, 'userprofile') and obj.user.userprofile.photo_url:
+            photo_url = obj.user.userprofile.photo_url
+        
+        return {
+            "uuid": str(obj.user_id),
+            "display_name": obj.user.display_name or "",
+            "photo_url": photo_url,
+        }
 
     def validate_number_of_people(self, v):
         if v < 1:
@@ -139,7 +148,16 @@ class RootSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "founder", "created_at", "modified_at"]
 
     def get_founder(self, obj):
-        return {"uuid": str(obj.founder_id)}
+        # 프로필에서 photo_url 가져오기
+        photo_url = ""
+        if hasattr(obj.founder, 'localprofile') and obj.founder.localprofile.photo_url:
+            photo_url = obj.founder.localprofile.photo_url
+        
+        return {
+            "uuid": str(obj.founder_id),
+            "display_name": obj.founder.display_name or "",
+            "photo_url": photo_url,
+        }
 
     def validate_number_of_people(self, v):
         if v < 1:
