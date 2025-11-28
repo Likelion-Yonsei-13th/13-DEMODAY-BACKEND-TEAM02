@@ -5,6 +5,8 @@ from .views import (
     RootListCreateView,
     RootRetrieveUpdateDestroyView,
     ThemeTagListView,
+    RatingListCreateView,
+    RatingRetrieveUpdateDestroyView,
 )
 from .upload_views import ImageUploadView
 
@@ -22,4 +24,8 @@ urlpatterns = [
 
     # Image Upload
     path("upload-image/", ImageUploadView.as_view(), name="root-image-upload"),
+
+    # Ratings
+    path("ratings/", RatingListCreateView.as_view(), name="rating-list-create"),
+    path("ratings/<int:pk>/", RatingRetrieveUpdateDestroyView.as_view(), name="rating-detail"),
 ]

@@ -1,9 +1,10 @@
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, filters
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from django.db.models import Avg
 
-from .models import Request, Root, ThemeTag
-from .serializers import RequestSerializer, RootSerializer, ThemeTagSerializer
+from .models import Request, Root, ThemeTag, Rating
+from .serializers import RequestSerializer, RootSerializer, ThemeTagSerializer, RatingSerializer
 from .permissions import IsOwnerOrReadOnly, CanCreateRequest, CanCreateRoot
 
 
@@ -41,7 +42,11 @@ class RootListCreateView(generics.ListCreateAPIView):
     GET: 누구나(비로그인 포함) 조회 가능
     POST: 로그인 + role == LOCAL만 생성 가능
     """
-    queryset = Root.objects.select_related("founder", "place").all()
+    queryset = (
+        Root.objects.select_related("founder", "place")
+        .annotate(average_rating=Avg("ratings__rating"))
+        .all()
+    )
     serializer_class = RootSerializer
     permission_classes = [CanCreateRoot]  # SAFE_METHODS 허용 + LOCAL만 POST 허용
 
@@ -49,8 +54,8 @@ class RootListCreateView(generics.ListCreateAPIView):
     filterset_fields = ["place", "founder"]
     # Root도 ThemeTag ManyToMany를 사용하므로 name 기준 검색
     search_fields = ["travel_type__name", "experience"]
-    ordering_fields = ["created_at", "modified_at"]
-    ordering = ["-created_at"]
+    ordering_fields = ["created_at", "modified_at", "average_rating"]
+    ordering = ["-average_rating", "-created_at"]
 
 
 class RootRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
@@ -58,7 +63,11 @@ class RootRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     GET: 모두 허용
     PATCH/PUT/DELETE: 소유자 또는 staff만
     """
-    queryset = Root.objects.select_related("founder", "place").all()
+    queryset = (
+        Root.objects.select_related("founder", "place")
+        .annotate(average_rating=Avg("ratings__rating"))
+        .all()
+    )
     serializer_class = RootSerializer
     permission_classes = [IsOwnerOrReadOnly]
 
@@ -81,3 +90,50 @@ class ThemeTagListView(generics.ListAPIView):
     filterset_fields = ["level", "parent"]
     ordering_fields = ["level", "id", "name"]
     ordering = ["level", "id"]
+
+
+# -------- Rating (제안서 평점) --------
+class RatingListCreateView(generics.ListCreateAPIView):
+    queryset = Rating.objects.select_related("root", "user").all()
+    serializer_class = RatingSerializer
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ["root", "user"]
+    ordering_fields = ["created_at", "rating"]
+    ordering = ["-created_at"]
+
+    def perform_create(self, serializer):
+        rating = serializer.save()
+        root = rating.root
+        ratings = list(root.ratings.all())
+        root.average_rating = (
+            sum(r.rating for r in ratings) / len(ratings) if ratings else 0
+        )
+        root.rating_count = len(ratings)
+        root.save()
+
+
+class RatingRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Rating.objects.select_related("root", "user").all()
+    serializer_class = RatingSerializer
+    permission_classes = [AllowAny]
+
+    def perform_update(self, serializer):
+        rating = serializer.save()
+        root = rating.root
+        ratings = list(root.ratings.all())
+        root.average_rating = (
+            sum(r.rating for r in ratings) / len(ratings) if ratings else 0
+        )
+        root.rating_count = len(ratings)
+        root.save()
+
+    def perform_destroy(self, instance):
+        root = instance.root
+        instance.delete()
+        ratings = list(root.ratings.all())
+        root.average_rating = (
+            sum(r.rating for r in ratings) / len(ratings) if ratings else 0
+        )
+        root.rating_count = len(ratings)
+        root.save()
