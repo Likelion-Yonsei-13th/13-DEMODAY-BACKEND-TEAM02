@@ -94,6 +94,14 @@ class RequestSerializer(serializers.ModelSerializer):
 class RootSerializer(serializers.ModelSerializer):
     founder = serializers.SerializerMethodField(read_only=True)
 
+    # 여행지 정보 nested 반환 (GET), 작성 시는 ID만 (POST/PUT)
+    place = TravelPlaceSerializer(read_only=True)
+    place_id = serializers.PrimaryKeyRelatedField(
+        queryset=TravelPlace.objects.all(),
+        source="place",
+        write_only=True,
+    )
+
     # 응답용: 루트에 연결된 모든 여행 태그 정보
     travel_type = ThemeTagSerializer(many=True, read_only=True)
 
@@ -113,6 +121,8 @@ class RootSerializer(serializers.ModelSerializer):
             "id",
             "founder",
             "place",
+            "place_id",
+            "title",
             "number_of_people",
             "guidance",
             "travel_type",

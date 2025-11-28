@@ -60,6 +60,7 @@ class Root(models.Model):  # 여행 루트
         related_name="roots",
     )
 
+    title = models.CharField(max_length=100, null=True, blank=True)     # 제안서 제목
     number_of_people = models.PositiveIntegerField(
         validators=[MinValueValidator(1)]
     )                                                                   # NOT NULL
