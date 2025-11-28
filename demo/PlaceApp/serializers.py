@@ -10,6 +10,8 @@ from .models import (
 
 
 class TravelPlaceSerializer(serializers.ModelSerializer):
+    photo = serializers.SerializerMethodField()
+    
     class Meta:
         model = TravelPlace
         fields = [
@@ -23,9 +25,19 @@ class TravelPlaceSerializer(serializers.ModelSerializer):
             "view_count",
             "likes_count",
         ]
+    
+    def get_photo(self, obj):
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return ""
 
 
 class TravelPlaceListSerializerFlat(serializers.ModelSerializer):
+    photo = serializers.SerializerMethodField()
+    
     class Meta:
         model = TravelPlace
         fields = (
@@ -39,6 +51,14 @@ class TravelPlaceListSerializerFlat(serializers.ModelSerializer):
             "likes_count",
             "view_count",
         )
+    
+    def get_photo(self, obj):
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return ""
 
 
 class HotSpotSerializer(serializers.ModelSerializer):

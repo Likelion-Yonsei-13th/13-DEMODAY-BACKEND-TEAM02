@@ -11,7 +11,7 @@ class TravelPlace(models.Model):
     id = models.BigAutoField(primary_key=True)
 
     name = models.CharField(max_length=50)
-    photo = models.URLField(max_length=255)
+    photo = models.ImageField(upload_to='place_images/', blank=True, null=True)
 
     # 위치 정보 (나라 / 시도 / 구 / 동)
     country = models.CharField(max_length=50, default="", blank=True)
