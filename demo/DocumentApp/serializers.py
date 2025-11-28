@@ -127,6 +127,7 @@ class RootSerializer(serializers.ModelSerializer):
             "place_id",
             "title",
             "photo",
+            "schedule",
             "number_of_people",
             "guidance",
             "travel_type",
