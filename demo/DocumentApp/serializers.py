@@ -83,8 +83,8 @@ class RequestSerializer(serializers.ModelSerializer):
 
     def get_proposals(self, obj):
         # 요청서에 연결된 모든 제안서(Root) 반환
-        from .models import RequestRootMap
-        proposal_maps = obj.proposals.select_related('root').all()
+        # prefetch_related로 대랙 차기된 데이터 사용
+        proposal_maps = list(obj.proposals.all())
         return [
             {
                 "id": proposal_map.root.id,
