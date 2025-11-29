@@ -64,15 +64,15 @@ class RootRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [IsOwnerOrReadOnly]
 
 
-# -------- ThemeTag (읽기 전용) --------
+# -------- ThemeTag --------
 class ThemeTagListView(generics.ListAPIView):
     """
-    여행 테마 태그 목록 조회
-    - GET: 누구나(비로그인 포함) 조회 가능
-    - 필터:
-        ?level=1             -> level=1 태그만
-        ?parent=<id>         -> 해당 parent를 가진 태그만
-        ?level=2&parent=3    -> level=2 & parent=3 인 태그들
+    Travel theme tag list
+    - GET: Public access
+    - Filters:
+        ?level=1             -> Only level=1 tags
+        ?parent=<id>         -> Tags with specific parent
+        ?level=2&parent=3    -> level=2 & parent=3 tags
     """
     queryset = ThemeTag.objects.select_related("parent").all()
     serializer_class = ThemeTagSerializer
@@ -84,17 +84,17 @@ class ThemeTagListView(generics.ListAPIView):
     ordering = ["level", "id"]
 
 
-# -------- RequestRootMap (로컬 제안 - 요청서에 대한 대답) --------
+# -------- RequestRootMap --------
 class ProposalSendView(generics.CreateAPIView):
     """
-    POST: 로컬이 요청서에 대한 대답 제안서 전송
-    query_params: request_id (필수)
+    POST: Create proposal by local in response to traveler request
+    query_params: request_id (required)
     """
     serializer_class = RootSerializer
     permission_classes = [IsAuthenticated, CanCreateRoot]
     
     def create(self, request, *args, **kwargs):
-        # request_id를 GET 매개변수로 받아서 request 조회
+        # Get request_id from query parameters
         request_id = request.query_params.get('request_id')
         if not request_id:
             return Response(
@@ -110,13 +110,13 @@ class ProposalSendView(generics.CreateAPIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Root 생성
+        # Create Root object
         root_data = request.data.copy()
         root_serializer = RootSerializer(data=root_data, context={'request': request})
         if root_serializer.is_valid():
             root = root_serializer.save()
             
-            # RequestRootMap 생성 (로컬의 대답으로 기록)
+            # Create RequestRootMap
             RequestRootMap.objects.create(
                 request=target_request,
                 root=root,
@@ -179,7 +179,7 @@ class ProposalAcceptView(APIView):
         }, status=status.HTTP_200_OK)
 
 
-# -------- Rating (\uc81c\uc548\uc11c \ud3c9\uc810) --------
+# -------- Rating --------
 class RatingListCreateView(generics.ListCreateAPIView):
     queryset = Rating.objects.select_related("root", "user").all()
     serializer_class = RatingSerializer
