@@ -83,7 +83,7 @@ class RequestSerializer(serializers.ModelSerializer):
 
     def get_proposals(self, obj):
         # 요청서에 연결된 모든 제안서(Root) 반환
-        # prefetch_related로 대랙 차기된 데이터 사용
+        # prefetch_related로 대랍 겠쉠된 데이터 사용
         proposal_maps = list(obj.proposals.all())
         return [
             {
@@ -94,6 +94,7 @@ class RequestSerializer(serializers.ModelSerializer):
                     "display_name": proposal_map.root.founder.display_name or "",
                 },
                 "created_at": proposal_map.created_at,
+                "acceptance": proposal_map.acceptance,
             }
             for proposal_map in proposal_maps
         ]

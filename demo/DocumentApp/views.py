@@ -159,8 +159,8 @@ class ProposalAcceptView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Verify ownership
-        if proposal_map.request.user_id != request.user.id:
+        # Verify ownership - compare UUIDs as strings
+        if str(proposal_map.request.user_id) != str(request.user.id):
             return Response(
                 {"error": "You can only accept your own proposals"},
                 status=status.HTTP_403_FORBIDDEN
