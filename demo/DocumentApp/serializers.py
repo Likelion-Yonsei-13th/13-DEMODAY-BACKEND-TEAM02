@@ -45,6 +45,9 @@ class RequestSerializer(serializers.ModelSerializer):
         allow_empty=True,
     )
 
+    # 응답용: 요청서에 연결된 제안서(Root) 목록
+    proposals = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Request
         fields = [
@@ -62,6 +65,7 @@ class RequestSerializer(serializers.ModelSerializer):
             "experience",
             "is_public_profile",
             "created_at",
+            "proposals",
         ]
         read_only_fields = ["id", "user", "created_at"]
 
@@ -76,6 +80,23 @@ class RequestSerializer(serializers.ModelSerializer):
             "display_name": obj.user.display_name or "",
             "photo_url": photo_url,
         }
+
+    def get_proposals(self, obj):
+        # 요청서에 연결된 모든 제안서(Root) 반환
+        from .models import RequestRootMap
+        proposal_maps = obj.proposals.select_related('root').all()
+        return [
+            {
+                "id": proposal_map.root.id,
+                "title": proposal_map.root.title,
+                "founder": {
+                    "uuid": str(proposal_map.root.founder_id),
+                    "display_name": proposal_map.root.founder.display_name or "",
+                },
+                "created_at": proposal_map.created_at,
+            }
+            for proposal_map in proposal_maps
+        ]
 
     def validate_number_of_people(self, v):
         if v < 1:

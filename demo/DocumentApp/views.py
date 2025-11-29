@@ -1,8 +1,9 @@
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import generics, filters
+from rest_framework import generics, filters, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
 
-from .models import Request, Root, ThemeTag, Rating
+from .models import Request, Root, ThemeTag, Rating, RequestRootMap
 from .serializers import RequestSerializer, RootSerializer, ThemeTagSerializer, RatingSerializer
 from .permissions import IsOwnerOrReadOnly, CanCreateRequest, CanCreateRoot
 
@@ -13,7 +14,7 @@ class RequestListCreateView(generics.ListCreateAPIView):
     GET: 누구나(비로그인 포함) 조회 가능
     POST: 로그인 + role == USER만 생성 가능
     """
-    queryset = Request.objects.select_related("user", "place").all()
+    queryset = Request.objects.select_related("user", "place").prefetch_related("proposals__root__founder").all()
     serializer_class = RequestSerializer
     permission_classes = [CanCreateRequest]  # SAFE_METHODS 허용 + USER만 POST 허용
 
@@ -30,7 +31,7 @@ class RequestRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     GET: 모두 허용
     PATCH/PUT/DELETE: 소유자 또는 staff만
     """
-    queryset = Request.objects.select_related("user", "place").all()
+    queryset = Request.objects.select_related("user", "place").prefetch_related("proposals__root__founder").all()
     serializer_class = RequestSerializer
     permission_classes = [IsOwnerOrReadOnly]
 
@@ -81,6 +82,52 @@ class ThemeTagListView(generics.ListAPIView):
     filterset_fields = ["level", "parent"]
     ordering_fields = ["level", "id", "name"]
     ordering = ["level", "id"]
+
+
+# -------- RequestRootMap (로컬 제안 - 요청서에 대한 대답) --------
+class ProposalSendView(generics.CreateAPIView):
+    """
+    POST: 로컬이 요청서에 대한 대답 제안서 전송
+    query_params: request_id (필수)
+    """
+    serializer_class = RootSerializer
+    permission_classes = [IsAuthenticated, CanCreateRoot]
+    
+    def create(self, request, *args, **kwargs):
+        # request_id를 GET 매개변수로 받아서 request 조회
+        request_id = request.query_params.get('request_id')
+        if not request_id:
+            return Response(
+                {"error": "request_id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            target_request = Request.objects.get(id=request_id)
+        except Request.DoesNotExist:
+            return Response(
+                {"error": "Request not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Root 생성
+        root_data = request.data.copy()
+        root_serializer = RootSerializer(data=root_data, context={'request': request})
+        if root_serializer.is_valid():
+            root = root_serializer.save()
+            
+            # RequestRootMap 생성 (로컬의 대답으로 기록)
+            RequestRootMap.objects.create(
+                request=target_request,
+                root=root,
+                acceptance=False,
+                is_finished=False,
+                rating=0,
+                review=""
+            )
+            
+            return Response(root_serializer.data, status=status.HTTP_201_CREATED)
+        return Response(root_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
 # -------- Rating (제안서 평점) --------

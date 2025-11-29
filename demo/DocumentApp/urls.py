@@ -5,6 +5,7 @@ from .views import (
     RootListCreateView,
     RootRetrieveUpdateDestroyView,
     ThemeTagListView,
+    ProposalSendView,
     RatingListCreateView,
     RatingRetrieveUpdateDestroyView,
 )
@@ -21,6 +22,9 @@ urlpatterns = [
 
     # Theme Tags (읽기 전용 리스트)
     path("theme-tags/", ThemeTagListView.as_view(), name="theme-tag-list"),
+
+    # Proposal Send (로컬이 요청서에 대한 대답 제안서 전송)
+    path("proposals/send/", ProposalSendView.as_view(), name="proposal-send"),
 
     # Image Upload
     path("upload-image/", ImageUploadView.as_view(), name="root-image-upload"),
