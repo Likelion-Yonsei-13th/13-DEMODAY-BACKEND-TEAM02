@@ -2,6 +2,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, filters, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .models import Request, Root, ThemeTag, Rating, RequestRootMap
 from .serializers import RequestSerializer, RootSerializer, ThemeTagSerializer, RatingSerializer
@@ -130,7 +131,56 @@ class ProposalSendView(generics.CreateAPIView):
         return Response(root_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# -------- Rating (제안서 평점) --------
+# -------- ProposalAccept (\uc5ec\ud96c\ub0b4 \uc218\ub77d) --------
+class ProposalAcceptView(APIView):
+    """
+    PATCH: \uc5ec\ud96c\ub0b4\uac00 \ub85c\uceec \uc81c\uc548\uc744 \uc218\ub77d
+    query_params: request_id, root_id (\ub450 \uc544\ub9cc\ub4dc)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def patch(self, request):
+        request_id = request.query_params.get('request_id')
+        root_id = request.query_params.get('root_id')
+        
+        if not request_id or not root_id:
+            return Response(
+                {"error": "request_id and root_id are required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            proposal_map = RequestRootMap.objects.get(
+                request_id=request_id,
+                root_id=root_id
+            )
+        except RequestRootMap.DoesNotExist:
+            return Response(
+                {"error": "Proposal not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # \uc5ec\ud96c\ub0b4\uac00 request\uc758 \uc18c\uc720\uc790\uc778\uc9c0 \ud655\uc778
+        if proposal_map.request.user_id != request.user.id:
+            return Response(
+                {"error": "You can only accept your own proposals"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # \uc218\ub77d \uc2a4\ub2e4\ub08c \uc5c5\ub370\uc774\ud2b8
+        proposal_map.acceptance = True
+        proposal_map.is_finished = True
+        proposal_map.save()
+        
+        return Response({
+            "status": "success",
+            "message": "\ub85c\uceec \uc81c\uc548\uc744 \uc218\ub77d\ud588\uc2b5\ub2c8\ub2e4.",
+            "acceptance": True,
+            "is_finished": True
+        }, status=status.HTTP_200_OK)
+
+
+# -------- Rating (\uc81c\uc548\uc11c \ud3c9\uc810) --------
 class RatingListCreateView(generics.ListCreateAPIView):
     queryset = Rating.objects.select_related("root", "user").all()
     serializer_class = RatingSerializer
