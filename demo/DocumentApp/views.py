@@ -159,10 +159,10 @@ class ProposalAcceptView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # Verify ownership - compare UUIDs as strings
+        # Verify ownership - only the traveler (request owner) can accept
         if str(proposal_map.request.user_id) != str(request.user.id):
             return Response(
-                {"error": "You can only accept your own proposals"},
+                {"error": f"Only the traveler can accept proposals. Expected user {proposal_map.request.user_id}, got {request.user.id}"},
                 status=status.HTTP_403_FORBIDDEN
             )
         
