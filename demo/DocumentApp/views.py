@@ -13,16 +13,15 @@ from .permissions import IsOwnerOrReadOnly, CanCreateRequest, CanCreateRoot
 # -------- Request --------
 class RequestListCreateView(generics.ListCreateAPIView):
     """
-    GET: 누구나(비로그인 포함) 조회 가능
-    POST: 로그인 + role == USER만 생성 가능
+    GET: Public
+    POST: Authenticated USER role only
     """
     queryset = Request.objects.select_related("user", "place").prefetch_related("proposals__root__founder").all()
     serializer_class = RequestSerializer
-    permission_classes = [CanCreateRequest]  # SAFE_METHODS 허용 + USER만 POST 허용
+    permission_classes = [CanCreateRequest]
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["place", "date", "user"]
-    # travel_type는 ManyToMany(ThemeTag)이므로 name 기준으로 검색
     search_fields = ["travel_type__name", "experience"]
     ordering_fields = ["date", "created_at"]
     ordering = ["-created_at"]
@@ -30,8 +29,8 @@ class RequestListCreateView(generics.ListCreateAPIView):
 
 class RequestRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     """
-    GET: 모두 허용
-    PATCH/PUT/DELETE: 소유자 또는 staff만
+    GET: Public
+    PATCH/PUT/DELETE: Owner only
     """
     queryset = Request.objects.select_related("user", "place").prefetch_related("proposals__root__founder").all()
     serializer_class = RequestSerializer
@@ -41,16 +40,15 @@ class RequestRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 # -------- Root --------
 class RootListCreateView(generics.ListCreateAPIView):
     """
-    GET: 누구나(비로그인 포함) 조회 가능
-    POST: 로그인 + role == LOCAL만 생성 가능
+    GET: Public
+    POST: Authenticated LOCAL role only
     """
     queryset = Root.objects.select_related("founder", "place").all()
     serializer_class = RootSerializer
-    permission_classes = [CanCreateRoot]  # SAFE_METHODS 허용 + LOCAL만 POST 허용
+    permission_classes = [CanCreateRoot]
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ["place", "founder"]
-    # Root도 ThemeTag ManyToMany를 사용하므로 name 기준 검색
     search_fields = ["travel_type__name", "experience"]
     ordering_fields = ["created_at", "modified_at", "average_rating"]
     ordering = ["-average_rating", "-created_at"]
@@ -58,8 +56,8 @@ class RootListCreateView(generics.ListCreateAPIView):
 
 class RootRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     """
-    GET: 모두 허용
-    PATCH/PUT/DELETE: 소유자 또는 staff만
+    GET: Public
+    PATCH/PUT/DELETE: Owner only
     """
     queryset = Root.objects.select_related("founder", "place").all()
     serializer_class = RootSerializer
@@ -132,11 +130,11 @@ class ProposalSendView(generics.CreateAPIView):
         return Response(root_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# -------- ProposalAccept (\uc5ec\ud96c\ub0b4 \uc218\ub77d) --------
+# -------- ProposalAccept --------
 class ProposalAcceptView(APIView):
     """
-    PATCH: \uc5ec\ud96c\ub0b4\uac00 \ub85c\uceec \uc81c\uc548\uc744 \uc218\ub77d
-    query_params: request_id, root_id (\ub450 \uc544\ub9cc\ub4dc)
+    PATCH: Accept proposal by traveler
+    query_params: request_id, root_id (both required)
     """
     permission_classes = [IsAuthenticated]
     
@@ -161,21 +159,21 @@ class ProposalAcceptView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
         
-        # \uc5ec\ud96c\ub0b4\uac00 request\uc758 \uc18c\uc720\uc790\uc778\uc9c0 \ud655\uc778
+        # Verify ownership
         if proposal_map.request.user_id != request.user.id:
             return Response(
                 {"error": "You can only accept your own proposals"},
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        # \uc218\ub77d \uc2a4\ub2e4\ub08c \uc5c5\ub370\uc774\ud2b8
+        # Update acceptance status
         proposal_map.acceptance = True
         proposal_map.is_finished = True
         proposal_map.save()
         
         return Response({
             "status": "success",
-            "message": "\ub85c\uceec \uc81c\uc548\uc744 \uc218\ub77d\ud588\uc2b5\ub2c8\ub2e4.",
+            "message": "Proposal accepted successfully",
             "acceptance": True,
             "is_finished": True
         }, status=status.HTTP_200_OK)
